@@ -371,19 +371,125 @@ llm:
   - 例如：ContentReviewer使用更便宜的模型
   - ChapterWriter使用质量更高的模型
 
-## 9. 核心Tool列表
+## 9. 会话持久化与恢复机制
+
+### 9.1 设计目标
+
+支持会话的保存和恢复，允许用户中断后继续工作，不丢失上下文和执行状态。
+
+### 9.2 持久化内容
+
+**会话状态（Session State）**:
+- 会话ID和元数据（创建时间、最后活跃时间）
+- 完整的消息历史
+- 当前加载的Skill列表
+- 工程上下文（大纲、人设、已生成章节等）
+
+**执行记录（Execution Log）**:
+- Tool调用记录（参数、返回值、时间戳）
+- SubAgent执行记录（输入、输出、状态）
+- Task执行历史（步骤、状态变更）
+
+**检查点（Checkpoint）**:
+- 关键操作后自动创建检查点
+- 用户可手动创建检查点
+- 支持回滚到指定检查点
+
+### 9.3 存储结构
+
+```python
+class SessionStore:
+    def save_session(session_id: str, session: Session) -> None:
+        """保存会话状态"""
+
+    def load_session(session_id: str) -> Session:
+        """加载会话状态"""
+
+    def list_sessions() -> List[SessionMetadata]:
+        """列出所有会话"""
+
+    def delete_session(session_id: str) -> None:
+        """删除会话"""
+
+class CheckpointManager:
+    def create_checkpoint(session_id: str, name: str = None) -> str:
+        """创建检查点，返回checkpoint_id"""
+
+    def restore_checkpoint(checkpoint_id: str) -> Session:
+        """恢复到指定检查点"""
+
+    def list_checkpoints(session_id: str) -> List[Checkpoint]:
+        """列出会话的所有检查点"""
+```
+
+### 9.4 文件存储格式
+
+```
+data/
+├── sessions/
+│   ├── {session_id}/
+│   │   ├── metadata.json       # 会话元数据
+│   │   ├── messages.jsonl      # 消息历史（每行一条）
+│   │   ├── context.json        # 工程上下文
+│   │   └── execution_log.jsonl # 执行记录
+│   └── ...
+└── checkpoints/
+    ├── {checkpoint_id}.json    # 检查点快照
+    └── ...
+```
+
+### 9.5 自动保存策略
+
+- 每次对话后自动保存会话状态
+- Tool执行后追加执行记录
+- 关键操作后自动创建检查点：
+  - 章节生成完成
+  - Review完成
+  - 大纲确定
+
+### 9.6 恢复流程
+
+```
+用户请求恢复会话
+    ↓
+加载会话元数据
+    ↓
+恢复消息历史
+    ↓
+恢复工程上下文（大纲、人设等）
+    ↓
+重新加载Skill
+    ↓
+恢复执行状态（未完成的Task）
+    ↓
+继续对话
+```
+
+## 10. 核心Tool列表
 
 除了SubAgent相关的tool，系统还需要以下基础tool：
 
-1. **analyze_plot** - 分析情节结构、节奏、冲突
-2. **save_chapter** - 保存章节内容
-3. **load_chapter** - 加载章节内容
-4. **list_chapters** - 列出所有章节
-5. **save_outline** - 保存大纲
-6. **load_outline** - 加载大纲
+**内容管理类**:
+1. **save_chapter** - 保存章节内容
+2. **load_chapter** - 加载章节内容
+3. **list_chapters** - 列出所有章节
+4. **save_outline** - 保存大纲
+5. **load_outline** - 加载大纲
+
+**分析类**:
+6. **analyze_plot** - 分析情节结构、节奏、冲突
+
+**代理管理类**:
 7. **create_subagent** - 动态创建SubAgent
 8. **create_task** - 创建任务
 9. **get_task_status** - 查询任务状态
+
+**会话管理类**:
+10. **save_session** - 保存当前会话
+11. **load_session** - 加载历史会话
+12. **list_sessions** - 列出所有会话
+13. **create_checkpoint** - 创建检查点
+14. **restore_checkpoint** - 恢复到检查点
 
 ## 10. 项目结构
 
@@ -409,7 +515,9 @@ ai-agent-core/
 │   │   ├── outline_tools.py     # 大纲相关tool
 │   │   └── analysis_tools.py    # 分析相关tool
 │   ├── storage/
-│   │   └── repository.py        # 存储接口
+│   │   ├── repository.py        # 存储接口
+│   │   ├── session_store.py     # 会话持久化
+│   │   └── checkpoint.py        # 检查点管理
 │   └── api/
 │       └── routes.py            # FastAPI路由
 ├── skills/
@@ -435,12 +543,14 @@ ai-agent-core/
 2. AgentCore基础对话能力
 3. Tool注册机制
 4. 基础的章节生成tool
+5. 会话持久化与恢复机制
 
 ### Phase 2: 能力扩展
 1. Skill系统
 2. SubAgent系统（预定义的4个SubAgent）
 3. Context压缩
 4. 更多Provider支持
+5. 检查点机制
 
 ### Phase 3: 高级特性
 1. Task系统
