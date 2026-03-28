@@ -465,7 +465,272 @@ data/
 继续对话
 ```
 
-## 10. 核心Tool列表
+## 9. 会话持久化与恢复机制
+
+### 9.1 设计目标
+
+支持会话的保存和恢复，允许用户中断后继续工作，不丢失上下文和执行状态。
+
+### 9.2 持久化内容
+
+**会话状态（Session State）**:
+- 会话ID和元数据（创建时间、最后活跃时间）
+- 完整的消息历史
+- 当前加载的Skill列表
+- 工程上下文（大纲、人设、已生成章节等）
+
+**执行记录（Execution Log）**:
+- Tool调用记录（参数、返回值、时间戳）
+- SubAgent执行记录（输入、输出、状态）
+- Task执行历史（步骤、状态变更）
+
+**检查点（Checkpoint）**:
+- 关键操作后自动创建检查点
+- 用户可手动创建检查点
+- 支持回滚到指定检查点
+
+### 9.3 存储结构
+
+```python
+class SessionStore:
+    def save_session(session_id: str, session: Session) -> None:
+        """保存会话状态"""
+
+    def load_session(session_id: str) -> Session:
+        """加载会话状态"""
+
+    def list_sessions() -> List[SessionMetadata]:
+        """列出所有会话"""
+
+    def delete_session(session_id: str) -> None:
+        """删除会话"""
+
+class CheckpointManager:
+    def create_checkpoint(session_id: str, name: str = None) -> str:
+        """创建检查点，返回checkpoint_id"""
+
+    def restore_checkpoint(checkpoint_id: str) -> Session:
+        """恢复到指定检查点"""
+
+    def list_checkpoints(session_id: str) -> List[Checkpoint]:
+        """列出会话的所有检查点"""
+```
+
+### 9.4 文件存储格式
+
+```
+data/
+├── sessions/
+│   ├── {session_id}/
+│   │   ├── metadata.json       # 会话元数据
+│   │   ├── messages.jsonl      # 消息历史（每行一条）
+│   │   ├── context.json        # 工程上下文
+│   │   └── execution_log.jsonl # 执行记录
+│   └── ...
+└── checkpoints/
+    ├── {checkpoint_id}.json    # 检查点快照
+    └── ...
+```
+
+### 9.5 自动保存策略
+
+- 每次对话后自动保存会话状态
+- Tool执行后追加执行记录
+- 关键操作后自动创建检查点：
+  - 章节生成完成
+  - Review完成
+  - 大纲确定
+
+### 9.6 恢复流程
+
+```
+用户请求恢复会话
+    ↓
+加载会话元数据
+    ↓
+恢复消息历史
+    ↓
+恢复工程上下文（大纲、人设等）
+    ↓
+重新加载Skill
+    ↓
+恢复执行状态（未完成的Task）
+    ↓
+继续对话
+```
+
+## 10. 实时反馈与可观测性
+
+### 10.1 设计目标
+
+所有生成的内容、执行状态、中间结果都需要实时反馈给用户，支持CLI和Web两种界面。
+
+### 10.2 事件流机制
+
+使用事件驱动架构，所有关键操作都发出事件：
+
+```python
+class EventType(Enum):
+    # 对话事件
+    MESSAGE_RECEIVED = "message_received"
+    MESSAGE_SENT = "message_sent"
+
+    # 内容生成事件
+    OUTLINE_GENERATED = "outline_generated"
+    CHAPTER_STARTED = "chapter_started"
+    CHAPTER_PROGRESS = "chapter_progress"  # 流式生成中
+    CHAPTER_COMPLETED = "chapter_completed"
+
+    # Review事件
+    REVIEW_STARTED = "review_started"
+    REVIEW_COMPLETED = "review_completed"
+    REVIEW_ISSUE_FOUND = "review_issue_found"
+
+    # Task事件
+    TASK_CREATED = "task_created"
+    TASK_STEP_STARTED = "task_step_started"
+    TASK_STEP_COMPLETED = "task_step_completed"
+    TASK_COMPLETED = "task_completed"
+
+    # Tool/SubAgent事件
+    TOOL_CALLED = "tool_called"
+    TOOL_RESULT = "tool_result"
+    SUBAGENT_STARTED = "subagent_started"
+    SUBAGENT_COMPLETED = "subagent_completed"
+
+class Event:
+    type: EventType
+    timestamp: datetime
+    data: dict
+    session_id: str
+```
+
+### 10.3 实时推送机制
+
+**CLI模式**:
+- 使用rich库实现实时更新的终端UI
+- 显示当前执行状态、进度条、日志流
+
+**Web模式**:
+- 使用Server-Sent Events (SSE) 推送事件
+- 前端实时更新UI显示
+
+```python
+class EventBus:
+    def publish(event: Event) -> None:
+        """发布事件到所有订阅者"""
+
+    def subscribe(event_types: List[EventType], callback: Callable) -> str:
+        """订阅特定类型的事件"""
+
+    def unsubscribe(subscription_id: str) -> None:
+        """取消订阅"""
+```
+
+### 10.4 可观测的内容类型
+
+**1. 生成内容**
+- 大纲：完整结构、章节列表
+- 人物设定：角色信息、关系图
+- 章节内容：实时流式显示生成过程
+- 对话优化：修改前后对比
+
+**2. 执行状态**
+- 当前正在执行的Task
+- Task的步骤进度（如：生成第3章，步骤2/4）
+- SubAgent执行状态（如：ContentReviewer正在审查）
+
+**3. Review意见**
+- 问题列表（按严重程度分类）
+- 具体位置标注
+- 修改建议
+- 是否已修复状态
+
+**4. 工程视图**
+- 章节列表（已完成/进行中/待生成）
+- 对话历史
+- 执行记录时间线
+- 检查点列表
+
+### 10.5 CLI展示设计
+
+使用rich库实现分区布局：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 工程: 《修仙传奇》              状态: 生成中            │
+├─────────────────────────────────────────────────────────┤
+│ 当前任务: 生成第3章                                      │
+│ 进度: ████████░░░░░░░░░░ 40% (2/5步骤)                  │
+│ 执行: ChapterWriter SubAgent                            │
+├─────────────────────────────────────────────────────────┤
+│ [对话区域]                                               │
+│ 用户: 生成第3章                                          │
+│ Agent: 好的，开始生成第3章...                            │
+│                                                          │
+│ [生成内容实时显示]                                       │
+│ 第三章 初入宗门                                          │
+│ 　　清晨的阳光洒在青石台阶上...                          │
+├─────────────────────────────────────────────────────────┤
+│ [状态栏]                                                 │
+│ 章节: 2已完成 | 1进行中 | 7待生成                        │
+│ Review: 0问题                                            │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 10.6 Web界面展示设计
+
+**主界面布局**:
+```
+┌──────────┬─────────────────────────────────────┬──────────┐
+│          │                                     │          │
+│  工程    │         对话区域                     │  侧边栏  │
+│  列表    │                                     │          │
+│          │  [消息1]                            │  章节    │
+│  工程1   │  [消息2]                            │  - 第1章 │
+│  工程2   │  [生成中的内容实时显示]              │  - 第2章 │
+│  工程3   │                                     │  - 第3章 │
+│          │                                     │          │
+│          │  [输入框]                           │  大纲    │
+│          │                                     │  人设    │
+│          ├─────────────────────────────────────┤  Review  │
+│          │  执行状态: ChapterWriter 生成中...   │  历史    │
+│          │  进度: 40%                          │          │
+└──────────┴─────────────────────────────────────┴──────────┘
+```
+
+**侧边栏内容**:
+- 章节列表（点击查看内容）
+- 大纲（可折叠）
+- 人设（可折叠）
+- Review意见（按章节分组）
+- 对话历史（可搜索）
+- 执行记录（时间线）
+
+### 10.7 实时更新示例
+
+**章节生成流程的事件序列**:
+```
+1. TASK_CREATED: "生成第3章"
+   → CLI/Web显示: 创建任务
+
+2. TASK_STEP_STARTED: "ChapterWriter开始生成"
+   → CLI/Web显示: 进度条开始，状态更新
+
+3. CHAPTER_PROGRESS: 流式内容片段
+   → CLI/Web显示: 实时追加显示生成的文字
+
+4. CHAPTER_COMPLETED: 完整章节
+   → CLI/Web显示: 进度100%，章节列表更新
+
+5. TASK_STEP_STARTED: "ContentReviewer开始审查"
+   → CLI/Web显示: 状态切换到Review
+
+6. REVIEW_COMPLETED: Review结果
+   → CLI/Web显示: Review意见列表，问题标注
+```
+
+## 11. 核心Tool列表
 
 除了SubAgent相关的tool，系统还需要以下基础tool：
 
@@ -490,6 +755,9 @@ data/
 12. **list_sessions** - 列出所有会话
 13. **create_checkpoint** - 创建检查点
 14. **restore_checkpoint** - 恢复到检查点
+
+**事件发布类**:
+15. **publish_event** - 发布事件到事件总线（内部使用）
 
 ## 10. 项目结构
 
@@ -518,8 +786,15 @@ ai-agent-core/
 │   │   ├── repository.py        # 存储接口
 │   │   ├── session_store.py     # 会话持久化
 │   │   └── checkpoint.py        # 检查点管理
+│   ├── events/
+│   │   ├── event_bus.py         # 事件总线
+│   │   └── event_types.py       # 事件类型定义
+│   ├── ui/
+│   │   ├── cli.py               # CLI界面
+│   │   └── rich_display.py      # Rich终端显示
 │   └── api/
-│       └── routes.py            # FastAPI路由
+│       ├── routes.py            # FastAPI路由
+│       └── sse.py               # Server-Sent Events
 ├── skills/
 │   ├── chapter-writer.md
 │   ├── content-reviewer.md
@@ -532,6 +807,9 @@ ai-agent-core/
 │   └── dialogue_refiner.yaml
 ├── config/
 │   └── llm.yaml                 # LLM配置
+├── data/                        # 运行时数据目录
+│   ├── sessions/
+│   └── checkpoints/
 ├── tests/
 └── requirements.txt
 ```
@@ -544,6 +822,7 @@ ai-agent-core/
 3. Tool注册机制
 4. 基础的章节生成tool
 5. 会话持久化与恢复机制
+6. 事件总线和基础CLI显示
 
 ### Phase 2: 能力扩展
 1. Skill系统
@@ -551,12 +830,14 @@ ai-agent-core/
 3. Context压缩
 4. 更多Provider支持
 5. 检查点机制
+6. Rich终端UI优化
 
 ### Phase 3: 高级特性
 1. Task系统
 2. 动态SubAgent创建
-3. 性能优化
-4. 完善的错误处理
+3. Web界面和SSE推送
+4. 性能优化
+5. 完善的错误处理
 
 ## 12. 非功能需求
 
