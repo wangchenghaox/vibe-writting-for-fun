@@ -1,134 +1,76 @@
-# AI 小说生成器 Web 应用
+# AI 小说生成器
 
-基于 FastAPI + Vue.js 的多用户 AI 小说创作平台。
+基于 AI Agent 的智能小说创作平台，支持 CLI 和 Web 两种使用方式。
 
 ## 功能特性
 
-- 用户注册/登录（JWT 认证）
-- 小说管理（创建、查看、统计）
-- 实时对话创作（WebSocket）
-- 章节审查历史
-- 多用户数据隔离
+- AI 对话式创作（支持工具调用）
+- 大纲/章节管理
+- 章节审查机制
+- 会话持久化
+- 多用户 Web 平台（JWT 认证）
+- 实时创作反馈（WebSocket）
 
 ## 技术栈
 
 **后端：**
 - FastAPI - Web 框架
-- SQLAlchemy - ORM
-- SQLite - 数据库
-- JWT - 身份认证
-- WebSocket - 实时通信
+- AI Agent Core - 对话引擎
+- 多 LLM 支持（Kimi/Claude/OpenAI）
+- SQLAlchemy + SQLite
+- WebSocket 实时通信
 
 **前端：**
-- Vue.js 3 - 前端框架
-- Vite - 构建工具
-- Element Plus - UI 组件库
-- Pinia - 状态管理
-- Axios - HTTP 客户端
+- Vue.js 3 + Vite
+- Element Plus
+- Pinia 状态管理
 
 ## 项目结构
 
 ```
-ai-agent-web/
-├── backend/          # FastAPI 后端
+vibe-writting-for-fun/
+├── backend/          # 统一后端
 │   ├── app/
-│   │   ├── api/      # API 路由
-│   │   ├── core/     # 核心配置
-│   │   ├── db/       # 数据库
+│   │   ├── agent/    # Agent 核心
+│   │   ├── llm/      # LLM 提供者
+│   │   ├── tools/    # 工具集
+│   │   ├── api/      # Web API
 │   │   └── models/   # 数据模型
-│   └── pyproject.toml
-├── frontend/         # Vue.js 前端
-│   ├── src/
-│   │   ├── api/      # API 调用
-│   │   ├── views/    # 页面组件
-│   │   ├── stores/   # 状态管理
-│   │   └── router/   # 路由配置
-│   └── package.json
-└── start.sh          # 一键启动脚本
+│   ├── config/       # 配置文件
+│   ├── data/         # 数据存储
+│   └── tests/        # 单元测试
+├── frontend/         # Web 前端
+└── start.sh          # 一键启动
 ```
 
 ## 快速开始
 
-### 本地开发
+### Web 应用
 
 **一键启动：**
 ```bash
-cd ai-agent-web
 ./start.sh
 ```
 
 访问：
 - 前端：http://localhost:5173
 - 后端：http://localhost:8000
+- API 文档：http://localhost:8000/docs
 
-**手动启动：**
+### 环境配置
 
-后端：
+创建 `backend/.env` 文件：
+```bash
+KIMI_API_KEY=your_api_key_here
+JWT_SECRET_KEY=your_secret_key
+```
+
+### 运行测试
+
 ```bash
 cd backend
-uv sync
-uv run uvicorn app.main:app --reload
+uv run pytest tests/ -v
 ```
-
-前端：
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### 部署到服务器
-
-1. **配置前端环境变量：**
-```bash
-cd frontend
-cp .env.example .env
-# 编辑 .env，设置服务器地址
-```
-
-2. **修改 `.env` 文件：**
-```
-VITE_API_URL=http://your-server-ip:8000
-VITE_WS_URL=ws://your-server-ip:8000
-```
-
-3. **开放安全组端口：**
-   - 8000（后端 API）
-   - 5173（前端）
-
-4. **启动服务：**
-```bash
-./start.sh
-```
-
-## API 文档
-
-启动后端后访问：http://localhost:8000/docs
-
-## 主要功能
-
-### 用户认证
-- POST `/api/auth/register` - 注册
-- POST `/api/auth/login` - 登录
-- GET `/api/auth/me` - 获取当前用户
-
-### 小说管理
-- GET `/api/novels` - 获取小说列表
-- POST `/api/novels` - 创建小说
-- GET `/api/novels/{id}` - 获取小说详情
-
-### 实时对话
-- WebSocket `/ws/chat/{novel_id}` - 对话连接
-
-### 审查历史
-- GET `/api/chapters/{chapter_id}/reviews` - 获取审查记录
-
-## 开发说明
-
-- 后端使用 `uv` 管理依赖
-- 前端使用 `npm` 管理依赖
-- 数据库文件位于 `backend/data/web.db`
-- CORS 已配置允许跨域访问
 
 ## License
 

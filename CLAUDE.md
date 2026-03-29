@@ -4,86 +4,113 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Chinese web novel generation tool built around an AI Agent core system. The project uses Python with FastAPI and supports multiple LLM providers (default: Kimi/Moonshot API).
+Chinese web novel generation tool with AI Agent core system. Python backend with FastAPI for both CLI and Web interfaces. Supports multiple LLM providers (default: Kimi/Moonshot API).
 
 ## Repository Structure
 
-- `ai-agent-core/` - Main Python application implementing the AI agent system
-- `openspec/` - OpenSpec workflow configuration and change management
-- `docs/superpowers/specs/` - Design specifications and architecture documents
-- `.claude/` - Claude Code skills and commands (OpenSpec workflow)
+- `backend/` - Consolidated Python application (CLI + Web API)
+- `frontend/` - Vue.js web interface
+- `docs/superpowers/specs/` - Design specifications
+- `.claude/` - Claude Code skills and OpenSpec workflow
 
 ## Development Commands
 
-### Setup and Dependencies
+### Backend Setup
 
 ```bash
-# Install uv package manager (if not installed)
-pip install uv
-
-# Install dependencies
-cd ai-agent-core
-uv sync
+cd backend
+uv sync  # Install dependencies
+cp .env.example .env  # Configure API keys
 ```
 
-### Configuration
+### Running Services
 
 ```bash
-# Create environment file
-cp ai-agent-core/.env.example ai-agent-core/.env
-# Edit .env and add your API keys (KIMI_API_KEY, etc.)
-```
+# CLI interface
+cd backend
+uv run python -m app.cli_main
 
-### Running the Application
+# Web API server
+cd backend
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-```bash
-# Run the CLI interface
-cd ai-agent-core
-uv run python -m src.main
+# Frontend dev server
+cd frontend
+npm run dev
 ```
 
 ### Testing
 
 ```bash
-# Run tests (when implemented)
-cd ai-agent-core
-uv run pytest
+cd backend
+uv run pytest                    # Run all tests
+uv run pytest tests/test_*.py    # Run specific test file
+uv run pytest --cov=app          # Run with coverage
 ```
 
 ## Architecture Overview
 
-The system uses a layered architecture:
+**Consolidated Backend** (`backend/app/`):
 
-1. **Agent Core Layer** (`src/agent/`) - Conversation engine and session management
-2. **LLM Provider Layer** (`src/llm/`) - Multi-provider adapter (Kimi, Claude, OpenAI)
-3. **Capability Layer** (`src/capability/`) - Tool registry, skill loader, subagent manager
-4. **Tools Layer** (`src/tools/`) - Concrete tool implementations (chapter, outline management)
-5. **Storage Layer** (`src/storage/`) - Session persistence and checkpoint management
-6. **Events Layer** (`src/events/`) - Event bus for real-time feedback
-7. **UI Layer** (`src/ui/`) - CLI interface using rich library
+1. **Agent Core** (`agent/`) - Conversation engine with context compression
+   - `AgentCore`: Main orchestrator, handles tool calls and LLM interaction
+   - `Session`: Message history management
+   - `ContextCompressor`: Auto-compresses when >70% of token limit (70k tokens)
+
+2. **LLM Providers** (`llm/`) - Multi-provider support via adapter pattern
+   - `KimiProvider`: Default, uses OpenAI SDK with 120s timeout
+   - `AnthropicProvider`: Direct Anthropic API integration
+   - Config: `config/llm.yaml` defines available providers
+
+3. **Capabilities** (`capability/`) - Core agent features
+   - `ToolRegistry`: Decorator-based tool registration (`@tool(name, desc)`)
+   - `SkillLoader`: Dynamic skill loading from markdown files
+   - `SubAgentManager`: Manages child agent instances
+   - `TaskManager`: Task tracking and status management
+
+4. **Tools** (`tools/`) - Concrete implementations
+   - Novel tools: `save_outline`, `save_chapter`, `load_chapter`
+   - Search tools: `web_search` (DuckDuckGo API, no key required)
+
+5. **Events** (`events/`) - Event-driven architecture
+   - `EventBus`: Singleton pub/sub for real-time updates
+   - Events: `TOOL_CALLED`, `TOOL_RESULT`, `CONTEXT_COMPRESSED`
+
+6. **API** (`api/`) - FastAPI REST + WebSocket endpoints
+   - Auth: JWT with bcrypt password hashing
+   - WebSocket: Real-time agent communication at `/ws/{novel_id}`
+   - Database: SQLAlchemy with SQLite
 
 ## Key Design Patterns
 
-- **Decorator-based Tool Registration**: Tools are registered using `@tool` decorator with automatic schema generation
-- **Event-Driven Architecture**: All operations emit events for real-time UI updates
-- **Provider Adapter Pattern**: Unified interface for multiple LLM providers
-- **Session Persistence**: Automatic saving of conversation state and execution logs
+- **Tool Registration**: Use `@tool("name", "description")` decorator. Tools auto-register and generate OpenAI function schemas
+- **Event-Driven UI**: CLI subscribes to `EventBus` for real-time tool call display
+- **Context Compression**: Triggered at 70k tokens, keeps system messages + last 10 messages, summarizes middle
+- **Session Persistence**: Auto-saves to `backend/data/sessions/`
+- **Database Testing**: Use `StaticPool` for SQLite in-memory tests to share state across connections
 
-## LLM Configuration
+## Critical Implementation Details
 
-LLM providers are configured in `ai-agent-core/config/llm.yaml`. The default provider is `kimi_coding` which uses the Claude Sonnet 4.6 model through Kimi's coding API.
+**Adding New Tools:**
+```python
+from app.capability.tool_registry import tool
 
-## OpenSpec Workflow
+@tool("tool_name", "Description for LLM")
+def my_tool(param: str) -> str:
+    return result
+```
+Then import in `app/tools/__init__.py`
 
-This project uses OpenSpec for structured feature development:
-- Use `/opsx:propose` to create new changes
-- Use `/opsx:explore` for thinking through ideas
-- Use `/opsx:apply` to implement tasks
-- Use `/opsx:archive` to finalize completed changes
+**CLI Context Loading:**
+When `/load <novel_id>` is called, the command handler adds novel metadata, outline, and chapter list as a system message to the agent's session. This ensures the agent has full context.
+
+**LLM Timeout Handling:**
+Kimi provider configured with 120s timeout and 2 retries. If 504/429 errors persist, context compression will trigger automatically on next request.
 
 ## Important Notes
 
-- All user-facing content and documentation is in Chinese
-- The system is designed for web novel generation with specific tools for chapters, outlines, and character management
-- Session state is automatically persisted to `ai-agent-core/data/sessions/`
-- The CLI uses rich library for real-time progress display
+- All user-facing content is in Chinese
+- Novel data stored in `backend/data/novels/{novel_id}/`
+- Test database uses `StaticPool` to prevent "no such table" errors
+- EventBus is a singleton - clear subscribers when creating new agent instances
+- Tool calls may have missing IDs from Kimi API - fallback IDs are generated automatically
