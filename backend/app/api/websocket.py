@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 import logging
 import asyncio
+from contextlib import suppress
 from concurrent.futures import ThreadPoolExecutor
 
 from app.db.base import get_db
@@ -35,13 +36,30 @@ async def websocket_chat(websocket: WebSocket, novel_id: int, token: str = Query
         await websocket.close(code=1008)
         return
 
-    async def handle_event(event):
-        await websocket.send_json({
-            "type": event.type.value,
-            "data": event.data
-        })
+    loop = asyncio.get_running_loop()
+    event_queue = asyncio.Queue()
+    send_lock = asyncio.Lock()
 
-    agent_service = WebAgentService(str(novel_id), on_event=lambda e: asyncio.create_task(handle_event(e)))
+    async def send_payload(payload):
+        async with send_lock:
+            await websocket.send_json(payload)
+
+    async def send_events():
+        while True:
+            event = await event_queue.get()
+            try:
+                await send_payload({
+                    "type": event.type.value,
+                    "data": event.data
+                })
+            finally:
+                event_queue.task_done()
+
+    def enqueue_event(event):
+        loop.call_soon_threadsafe(event_queue.put_nowait, event)
+
+    agent_service = WebAgentService(str(novel_id), on_event=enqueue_event)
+    event_task = asyncio.create_task(send_events())
 
     try:
         while True:
@@ -51,17 +69,18 @@ async def websocket_chat(websocket: WebSocket, novel_id: int, token: str = Query
                 logger.info(f"收到消息: {user_msg}")
 
                 try:
-                    loop = asyncio.get_event_loop()
                     ai_response = await loop.run_in_executor(executor, agent_service.chat, user_msg)
                     logger.info(f"AI响应: {ai_response[:100]}...")
 
-                    await websocket.send_json({
+                    await asyncio.sleep(0)
+                    await event_queue.join()
+                    await send_payload({
                         "type": "message_sent",
                         "content": ai_response
                     })
                 except Exception as e:
                     logger.error(f"AI处理错误: {e}", exc_info=True)
-                    await websocket.send_json({
+                    await send_payload({
                         "type": "message_sent",
                         "content": f"处理失败: {str(e)}"
                     })
@@ -69,3 +88,8 @@ async def websocket_chat(websocket: WebSocket, novel_id: int, token: str = Query
         logger.info("WebSocket断开连接")
     except Exception as e:
         logger.error(f"WebSocket错误: {e}")
+    finally:
+        agent_service.close()
+        event_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await event_task

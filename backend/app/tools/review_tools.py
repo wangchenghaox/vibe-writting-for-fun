@@ -1,5 +1,6 @@
 import json
 from ..capability.tool_registry import tool
+from app.core.paths import novel_path
 
 @tool(name="review_chapter", description="Review a chapter and provide feedback")
 def review_chapter(chapter_id: str, novel_id: str = None) -> str:
@@ -8,8 +9,8 @@ def review_chapter(chapter_id: str, novel_id: str = None) -> str:
     if novel_id is None:
         novel_id = os.getenv('CURRENT_NOVEL_ID', 'default')
 
-    path = f"data/novels/{novel_id}/chapters/{chapter_id}.json"
-    if not os.path.exists(path):
+    path = novel_path(novel_id) / "chapters" / f"{chapter_id}.json"
+    if not path.exists():
         return f"Chapter {chapter_id} not found"
 
     with open(path, 'r', encoding='utf-8') as f:

@@ -14,9 +14,10 @@ from ..events.event_types import Event, EventType
 logger = logging.getLogger(__name__)
 
 class AgentCore:
-    def __init__(self, provider: LLMProvider, session: Session):
+    def __init__(self, provider: LLMProvider, session: Session, tool_context: Optional[dict] = None):
         self.provider = provider
         self.session = session
+        self.tool_context = tool_context or {}
         self.event_bus = EventBus()
         self.context_compressor = ContextCompressor()
         self.skill_loader = SkillLoader()
@@ -53,7 +54,7 @@ class AgentCore:
 
                     self.event_bus.publish(Event(EventType.TOOL_CALLED, {"name": tool_name, "args": tool_args}, self.session.id))
 
-                    result = execute_tool(tool_name, tool_args)
+                    result = execute_tool(tool_name, tool_args, context=self.tool_context)
 
                     self.event_bus.publish(Event(EventType.TOOL_RESULT, {"name": tool_name, "result": result}, self.session.id))
 

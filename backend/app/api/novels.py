@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from pathlib import Path
 import json
 from app.db.base import get_db
 from app.models.novel import Novel
 from app.models.user import User
 from app.core.deps import get_current_user
+from app.core.paths import novel_path
 
 router = APIRouter(prefix="/api/novels", tags=["novels"])
 
@@ -20,8 +20,7 @@ def list_novels(db: Session = Depends(get_db), user: User = Depends(get_current_
     novels = db.query(Novel).filter(Novel.user_id == user.id).all()
     result = []
     for novel in novels:
-        novel_path = Path(f"../../ai-agent-core/data/novels/{novel.novel_id}")
-        chapters_dir = novel_path / "chapters"
+        chapters_dir = novel_path(novel.novel_id) / "chapters"
         chapter_count = len(list(chapters_dir.glob("*.json"))) if chapters_dir.exists() else 0
 
         total_words = 0
@@ -59,8 +58,7 @@ def get_novel(novel_id: int, db: Session = Depends(get_db), user: User = Depends
     if not novel:
         raise HTTPException(status_code=404, detail="Novel not found")
 
-    novel_path = Path(f"../../ai-agent-core/data/novels/{novel.novel_id}")
-    chapters_dir = novel_path / "chapters"
+    chapters_dir = novel_path(novel.novel_id) / "chapters"
     chapters = []
     if chapters_dir.exists():
         for chapter_file in sorted(chapters_dir.glob("*.json")):

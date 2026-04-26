@@ -7,6 +7,7 @@ def tool(name: str, description: str):
     def decorator(func: Callable):
         sig = inspect.signature(func)
         params = {}
+        required = []
 
         for param_name, param in sig.parameters.items():
             param_type = "string"
@@ -20,6 +21,8 @@ def tool(name: str, description: str):
                 "type": param_type,
                 "description": f"Parameter {param_name}"
             }
+            if param.default == inspect.Parameter.empty:
+                required.append(param_name)
 
         schema = {
             "type": "function",
@@ -29,14 +32,15 @@ def tool(name: str, description: str):
                 "parameters": {
                     "type": "object",
                     "properties": params,
-                    "required": list(params.keys())
+                    "required": required
                 }
             }
         }
 
         _tool_registry[name] = {
             "schema": schema,
-            "func": func
+            "func": func,
+            "signature": sig
         }
 
         return func
@@ -45,7 +49,15 @@ def tool(name: str, description: str):
 def get_tool_schemas() -> List[Dict[str, Any]]:
     return [t["schema"] for t in _tool_registry.values()]
 
-def execute_tool(name: str, arguments: Dict[str, Any]) -> Any:
+def execute_tool(name: str, arguments: Dict[str, Any], context: Dict[str, Any] = None) -> Any:
     if name not in _tool_registry:
         raise ValueError(f"Tool {name} not found")
-    return _tool_registry[name]["func"](**arguments)
+    entry = _tool_registry[name]
+    call_args = dict(arguments)
+
+    if context:
+        for key, value in context.items():
+            if key in entry["signature"].parameters and (key not in call_args or call_args[key] in (None, "")):
+                call_args[key] = value
+
+    return entry["func"](**call_args)
