@@ -1,11 +1,23 @@
 llm:
-  default: kimi_coding
+  default: ${LLM_PROVIDER:-kimi_coding}
   providers:
     kimi:
+      type: kimi
       api_key: ${KIMI_API_KEY}
-      model: moonshot-v1-8k
+      model: ${KIMI_MODEL:-moonshot-v1-8k}
       base_url: https://api.moonshot.cn/v1
     kimi_coding:
+      type: kimi_coding
       api_key: ${KIMI_API_KEY}
-      model: claude-sonnet-4-6
+      model: ${KIMI_CODING_MODEL:-claude-sonnet-4-6}
       base_url: https://api.kimi.com/coding/
+    openai:
+      type: openai
+      api_key: ${OPENAI_API_KEY}
+      model: ${OPENAI_MODEL}
+      base_url: https://api.openai.com/v1
+    claude:
+      type: claude
+      api_key: ${ANTHROPIC_API_KEY}
+      model: ${ANTHROPIC_MODEL}
+      base_url: https://api.anthropic.com

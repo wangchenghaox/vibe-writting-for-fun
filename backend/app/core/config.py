@@ -5,6 +5,7 @@ from pydantic import ConfigDict
 
 # 查找根目录的 .env 文件
 ROOT_DIR = Path(__file__).parent.parent.parent.parent
+BACKEND_DIR = ROOT_DIR / "backend"
 ENV_FILE = ROOT_DIR / ".env"
 
 class Settings(BaseSettings):
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_DAYS: int = 7
     KIMI_API_KEY: str = ""
+    DATA_DIR: Path = BACKEND_DIR / "data"
 
     @property
     def CORS_ORIGINS(self):
