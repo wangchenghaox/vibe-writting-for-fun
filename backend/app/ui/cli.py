@@ -51,7 +51,10 @@ class CLI:
 
         while True:
             try:
-                user_input = self.display.get_input()
+                user_input = self.display.get_input().strip()
+
+                if not user_input:
+                    continue
 
                 if user_input.lower() in ['exit', 'quit']:
                     self.session_store.save_session(session)
@@ -62,12 +65,15 @@ class CLI:
                 if command_handler.handle(user_input):
                     continue
 
-                response = agent.chat(user_input)
+                with self.display.console.status("[bold cyan]思考中...[/bold cyan]", spinner="dots"):
+                    response = agent.chat(user_input)
                 self.display.console.print(f"\n[bold blue]Assistant:[/bold blue] {response}\n")
 
-            except KeyboardInterrupt:
+            except EOFError:
                 self.session_store.save_session(session)
                 self.display.console.print("\n[yellow]Session saved. Goodbye![/yellow]")
                 break
+            except KeyboardInterrupt:
+                self.display.console.print("\n[yellow]已取消输入，按 Ctrl+D 或输入 exit 退出。[/yellow]")
             except Exception as e:
                 self.display.console.print(f"[red]Error: {e}[/red]")

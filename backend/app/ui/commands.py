@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 import json
+from rich.table import Table
+from .prompt_input import COMMANDS
 
 class CommandHandler:
     def __init__(self, console, agent=None):
@@ -127,10 +129,12 @@ class CommandHandler:
 
     def _show_help(self):
         """显示帮助信息"""
-        self.console.print("\n[bold cyan]可用命令:[/bold cyan]")
-        self.console.print("  /list       - 列出所有小说")
-        self.console.print("  /load <id>  - 加载指定小说")
-        self.console.print("  /current    - 显示当前小说")
-        self.console.print("  /chapters   - 列出当前小说的章节")
-        self.console.print("  /help       - 显示此帮助信息\n")
-
+        table = Table(title="可用命令", show_header=True, header_style="bold cyan")
+        table.add_column("命令", style="cyan", no_wrap=True)
+        table.add_column("说明")
+        for command, description in COMMANDS.items():
+            display = f"{command} <id>" if command == "/load" else command
+            table.add_row(display, description)
+        self.console.print()
+        self.console.print(table)
+        self.console.print()

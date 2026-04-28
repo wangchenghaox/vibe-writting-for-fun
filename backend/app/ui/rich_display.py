@@ -3,10 +3,12 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from ..events.event_bus import EventBus
 from ..events.event_types import Event, EventType
+from .prompt_input import PromptInput
 
 class RichDisplay:
-    def __init__(self):
+    def __init__(self, input_reader=None):
         self.console = Console()
+        self.input_reader = input_reader or PromptInput()
         self.event_bus = EventBus()
         self._setup_listeners()
 
@@ -39,7 +41,12 @@ class RichDisplay:
         self.console.print(f"[green]✓ 工具结果: {result}[/green]\n")
 
     def print_welcome(self):
-        self.console.print(Panel("[bold cyan]AI Agent Core - Phase 1 MVP[/bold cyan]\n\nCommands:\n- Type your message to chat\n- 'exit' to quit", border_style="cyan"))
+        self.console.print(Panel(
+            "[bold cyan]AI 小说创作 CLI[/bold cyan]\n\n"
+            "输入内容开始对话，输入 /help 查看命令。\n"
+            "Tab 自动补全，↑/↓ 浏览历史，Ctrl+D 退出。",
+            border_style="cyan",
+        ))
 
     def get_input(self, prompt: str = "> ") -> str:
-        return self.console.input(f"[bold]{prompt}[/bold]")
+        return self.input_reader.get_input(prompt)

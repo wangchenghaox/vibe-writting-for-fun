@@ -55,7 +55,7 @@ def test_load_config_resolves_default_provider_from_env(tmp_path, monkeypatch):
         tmp_path,
         """
         llm:
-          default: ${LLM_PROVIDER:-kimi_coding}
+          default: ${LLM_PROVIDER:-kimi}
           providers:
             openai:
               api_key: test-openai-key
@@ -67,6 +67,16 @@ def test_load_config_resolves_default_provider_from_env(tmp_path, monkeypatch):
     config = load_config(str(config_path))
 
     assert config["llm"]["default"] == "openai"
+
+
+def test_default_config_uses_latest_kimi_model_when_env_unset(monkeypatch):
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("KIMI_MODEL", raising=False)
+
+    config = load_config("config/llm.yaml")
+
+    assert config["llm"]["default"] == "kimi"
+    assert config["llm"]["providers"]["kimi"]["model"] == "kimi-k2.6"
 
 
 def test_default_config_declares_openai_and_claude_modes():

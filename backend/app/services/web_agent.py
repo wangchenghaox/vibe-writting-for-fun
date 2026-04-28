@@ -2,6 +2,7 @@
 完整的Agent服务，支持工具调用和事件推送
 """
 from typing import Callable
+from uuid import uuid4
 from app import tools as _tools
 from app.agent.core import AgentCore
 from app.agent.session import Session
@@ -15,7 +16,7 @@ class WebAgentService:
 
         # 初始化Agent
         self.provider = create_provider()
-        self.session = Session(f"web_{novel_id}")
+        self.session = Session(f"web_{novel_id}_{uuid4().hex}")
         self.session.context["novel_id"] = novel_id
         self.agent = AgentCore(self.provider, self.session, tool_context={"novel_id": novel_id})
         self._subscriptions = []

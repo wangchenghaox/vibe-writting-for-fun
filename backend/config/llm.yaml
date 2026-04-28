@@ -1,15 +1,15 @@
 llm:
-  default: ${LLM_PROVIDER:-kimi_coding}
+  default: ${LLM_PROVIDER:-kimi}
   providers:
     kimi:
       type: kimi
       api_key: ${KIMI_API_KEY}
-      model: ${KIMI_MODEL:-moonshot-v1-8k}
+      model: ${KIMI_MODEL:-kimi-k2.6}
       base_url: https://api.moonshot.cn/v1
     kimi_coding:
       type: kimi_coding
       api_key: ${KIMI_API_KEY}
-      model: ${KIMI_CODING_MODEL:-claude-sonnet-4-6}
+      model: ${KIMI_CODING_MODEL:-kimi-k2.6}
       base_url: https://api.kimi.com/coding/
     openai:
       type: openai

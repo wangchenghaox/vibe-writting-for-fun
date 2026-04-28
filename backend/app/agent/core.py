@@ -14,10 +14,17 @@ from ..events.event_types import Event, EventType
 logger = logging.getLogger(__name__)
 
 class AgentCore:
-    def __init__(self, provider: LLMProvider, session: Session, tool_context: Optional[dict] = None):
+    def __init__(
+        self,
+        provider: LLMProvider,
+        session: Session,
+        tool_context: Optional[dict] = None,
+        max_tool_rounds: int = 8,
+    ):
         self.provider = provider
         self.session = session
         self.tool_context = tool_context or {}
+        self.max_tool_rounds = max_tool_rounds
         self.event_bus = EventBus()
         self.context_compressor = ContextCompressor()
         self.skill_loader = SkillLoader()
@@ -37,7 +44,7 @@ class AgentCore:
             self.session.messages = messages
             self.event_bus.publish(Event(EventType.CONTEXT_COMPRESSED, {"count": len(messages)}, self.session.id))
 
-        while True:
+        for _ in range(self.max_tool_rounds):
             response = self.provider.chat(messages, tools)
 
             if response.tool_calls:
@@ -71,3 +78,7 @@ class AgentCore:
                 self.session.add_message("assistant", response.content)
                 self.event_bus.publish(Event(EventType.MESSAGE_SENT, {"content": response.content}, self.session.id))
                 return response.content
+
+        message = f"Exceeded maximum tool rounds: {self.max_tool_rounds}"
+        self.event_bus.publish(Event(EventType.ERROR, {"message": message}, self.session.id))
+        raise RuntimeError(message)

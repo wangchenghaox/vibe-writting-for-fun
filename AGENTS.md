@@ -63,13 +63,13 @@ uv run pytest --cov=app
 根目录 `.env.example` 是主要配置模板。当前 LLM 配置读取 `backend/config/llm.yaml`，默认 provider 是：
 
 ```yaml
-llm.default: ${LLM_PROVIDER:-kimi_coding}
+llm.default: ${LLM_PROVIDER:-kimi}
 ```
 
 支持的 provider：
 
-- `kimi`: OpenAI-compatible Moonshot API，默认 `moonshot-v1-8k`。
-- `kimi_coding`: 通过 Anthropic SDK 调用 `https://api.kimi.com/coding/`，默认 `claude-sonnet-4-6`。
+- `kimi`: OpenAI-compatible Moonshot API，默认 `kimi-k2.6`。
+- `kimi_coding`: 通过 Anthropic SDK 调用 `https://api.kimi.com/coding/`，默认 `kimi-k2.6`。
 - `openai`: OpenAI-compatible provider。
 - `claude`: Anthropic provider。
 
@@ -189,15 +189,12 @@ WebSocket：
 
 - 面向用户的产品文案、CLI 输出、错误提示优先使用中文。
 - 新工具使用 `@tool("name", "description")`，参数类型尽量用基础类型，工具函数返回字符串或可 JSON 序列化内容。
-- Web Agent 不应依赖或修改全局 `CURRENT_NOVEL_ID`；优先通过 `tool_context={"novel_id": ...}` 注入。
-- EventBus 是单例。CLI 会清空旧订阅；WebAgentService 会在 `close()` 中 unsubscribe。新增订阅时必须考虑串会话和泄漏。
+- Web Agent 不应依赖或修改全局 `CURRENT_NOVEL_ID`；通过 `tool_context={"novel_id": ...}` 注入业务小说 ID。
+- EventBus 是单例。CLI 会清空旧订阅；WebAgentService 使用连接级 session id，并在 `close()` 中 unsubscribe。
 - 不要把 `docs/superpowers/` 中的设计稿当成当前实现真相；以 `backend/app/` 和 `frontend/src/` 为准。
 - 修改 API 或数据路径时，同时检查 CLI、WebSocket、前端详情页和测试。
 
 ## Known Sharp Edges
 
 - `POST /api/novels` 只创建数据库记录，不创建 `backend/data/novels/{novel_id}` 目录或 `meta.json`。
-- WebSocket Chat 使用数据库 id 初始化 `WebAgentService`，可能导致工具保存路径与详情页读取路径不一致。
-- `start_agent_service.sh` 指向旧的 `ai-agent-core/src`，看起来是历史脚本。
-- `agent_bridge.py`、`agent_wrapper.py`、`simple_ai.py` 像兼容/过渡代码，动它们前先确认是否还有外部调用。
 - `GET /api/chapters/{chapter_id}/reviews` 只按 chapter_id 查 ReviewHistory，没有按当前用户或小说进一步限定。
