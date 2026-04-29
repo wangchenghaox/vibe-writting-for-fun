@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 class EventType(Enum):
     MESSAGE_RECEIVED = "message_received"
+    MESSAGE_DELTA = "message_delta"
     MESSAGE_SENT = "message_sent"
     THINKING = "thinking"
     TOOL_CALLED = "tool_called"

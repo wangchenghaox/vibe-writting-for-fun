@@ -64,6 +64,33 @@ def test_web_agent_uses_unique_session_per_connection(monkeypatch):
         second.close()
 
 
+def test_web_agent_chat_forwards_streaming_deltas(monkeypatch):
+    import app.services.web_agent as web_agent
+
+    class FakeProvider:
+        def chat_stream_response(self, messages, tools=None):
+            yield SimpleNamespace(type="content_delta", content="你")
+            yield SimpleNamespace(type="content_delta", content="好")
+            yield SimpleNamespace(
+                type="message_end",
+                response=SimpleNamespace(content="你好", tool_calls=None),
+            )
+
+    events = []
+    monkeypatch.setattr(web_agent, "create_provider", lambda: FakeProvider())
+
+    service = web_agent.WebAgentService("stream-novel", on_event=events.append)
+    try:
+        assert service.chat("hello") == "你好"
+    finally:
+        service.close()
+
+    assert [
+        event.data["content"] for event in events
+        if getattr(event.type, "value", None) == "message_delta"
+    ] == ["你", "好"]
+
+
 def test_agent_injects_context_novel_id_when_tool_call_omits_it():
     tool_name = f"context_probe_{uuid4().hex}"
 

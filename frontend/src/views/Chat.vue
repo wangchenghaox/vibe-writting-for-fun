@@ -31,7 +31,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
 
@@ -39,7 +39,39 @@ const route = useRoute()
 const userStore = useUserStore()
 const messages = ref([])
 const input = ref('')
+const messagesContainer = ref(null)
 let ws = null
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    }
+  })
+}
+
+function appendAssistantDelta(content) {
+  if (!content) return
+
+  const lastMessage = messages.value[messages.value.length - 1]
+  if (!lastMessage || lastMessage.role !== 'assistant' || !lastMessage.streaming) {
+    messages.value.push({ role: 'assistant', content: '', streaming: true })
+  }
+
+  messages.value[messages.value.length - 1].content += content
+  scrollToBottom()
+}
+
+function finishAssistantMessage(content) {
+  const lastMessage = messages.value[messages.value.length - 1]
+  if (lastMessage && lastMessage.role === 'assistant' && lastMessage.streaming) {
+    lastMessage.content = content
+    lastMessage.streaming = false
+  } else {
+    messages.value.push({ role: 'assistant', content })
+  }
+  scrollToBottom()
+}
 
 onMounted(() => {
   const novelId = route.params.id
@@ -56,9 +88,17 @@ onMounted(() => {
 
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data)
-    if (data.type === 'message_sent') {
-      messages.value.push({ role: 'assistant', content: data.content })
+    if (data.type === 'message_delta') {
+      appendAssistantDelta(data.data?.content || data.content || '')
+    } else if (data.type === 'message_sent') {
+      finishAssistantMessage(data.content || data.data?.content || '')
     }
+  }
+})
+
+onUnmounted(() => {
+  if (ws) {
+    ws.close()
   }
 })
 
@@ -73,5 +113,6 @@ function sendMessage() {
   messages.value.push({ role: 'user', content: input.value })
   ws.send(JSON.stringify({ type: 'message', content: input.value }))
   input.value = ''
+  scrollToBottom()
 }
 </script>
