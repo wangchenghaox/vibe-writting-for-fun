@@ -65,9 +65,14 @@ class CLI:
                 if command_handler.handle(user_input):
                     continue
 
-                with self.display.console.status("[bold cyan]思考中...[/bold cyan]", spinner="dots"):
-                    response = agent.chat(user_input)
-                self.display.console.print(f"\n[bold blue]Assistant:[/bold blue] {response}\n")
+                started_response = False
+                for chunk in agent.chat_stream(user_input):
+                    if not started_response:
+                        self.display.console.print("\n[bold blue]Assistant:[/bold blue] ", end="")
+                        started_response = True
+                    self.display.console.print(chunk, end="")
+                if started_response:
+                    self.display.console.print("\n")
 
             except EOFError:
                 self.session_store.save_session(session)

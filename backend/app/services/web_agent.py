@@ -23,7 +23,12 @@ class WebAgentService:
 
         # 订阅事件
         if on_event:
-            for event_type in (EventType.THINKING, EventType.TOOL_CALLED, EventType.TOOL_RESULT):
+            for event_type in (
+                EventType.MESSAGE_DELTA,
+                EventType.THINKING,
+                EventType.TOOL_CALLED,
+                EventType.TOOL_RESULT,
+            ):
                 self.agent.event_bus.subscribe(event_type, self._handle_event)
                 self._subscriptions.append(event_type)
 
@@ -43,4 +48,11 @@ class WebAgentService:
 
     def chat(self, message: str) -> str:
         """发送消息给Agent"""
-        return self.agent.chat(message)
+        chunks = []
+        for chunk in self.agent.chat_stream(message):
+            chunks.append(chunk)
+
+        for msg in reversed(self.session.messages):
+            if msg.get("role") == "assistant" and not msg.get("tool_calls"):
+                return msg["content"]
+        return "".join(chunks)

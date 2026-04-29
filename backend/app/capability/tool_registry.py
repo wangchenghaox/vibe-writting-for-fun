@@ -1,5 +1,5 @@
 import inspect
-from typing import Callable, Dict, Any, List
+from typing import Callable, Dict, Any, List, Optional, Sequence
 
 _tool_registry: Dict[str, Dict[str, Any]] = {}
 
@@ -46,8 +46,16 @@ def tool(name: str, description: str):
         return func
     return decorator
 
-def get_tool_schemas() -> List[Dict[str, Any]]:
-    return [t["schema"] for t in _tool_registry.values()]
+def get_tool_schemas(allowed_names: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
+    if allowed_names is None:
+        return [t["schema"] for t in _tool_registry.values()]
+
+    allowed = set(allowed_names)
+    return [
+        entry["schema"]
+        for name, entry in _tool_registry.items()
+        if name in allowed
+    ]
 
 def execute_tool(name: str, arguments: Dict[str, Any], context: Dict[str, Any] = None) -> Any:
     if name not in _tool_registry:
