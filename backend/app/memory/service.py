@@ -15,7 +15,7 @@ ALLOWED_MEMORY_TYPES = {
 
 
 def _require_context(user_id, novel_id, agent_name):
-    if not user_id or not novel_id or not agent_name:
+    if user_id is None or not novel_id or not agent_name:
         raise ValueError("缺少记忆上下文: user_id、novel_id、agent_name 必须存在")
 
 

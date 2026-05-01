@@ -90,7 +90,10 @@ class AgentCore:
         ]
 
     def _has_memory_context(self):
-        return all(self.tool_context.get(key) for key in MEMORY_CONTEXT_KEYS)
+        return all(
+            self.tool_context.get(key) is not None and self.tool_context.get(key) != ""
+            for key in MEMORY_CONTEXT_KEYS
+        )
 
     def _inject_skill_prompt(self, messages: list[dict], skills: list[SkillDefinition]):
         prompt = self.skill_loader.build_prompt(skills)

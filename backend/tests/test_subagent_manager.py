@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from app.agent.session import Session
@@ -61,6 +62,71 @@ def test_create_subagent_ids_do_not_collide_after_removal():
     assert first_editor_id in manager.subagents
     assert second_editor_id in manager.subagents
     assert first_editor_id != second_editor_id
+
+
+def test_create_subagent_attaches_recorder_with_runtime_identity():
+    mock_provider = Mock()
+    session = Session("parent_session")
+    manager = SubAgentManager()
+    created_recorders = []
+
+    class FakeRecorder:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.records = []
+            created_recorders.append(self)
+
+        def record(self, event_type, payload):
+            self.records.append((event_type, payload))
+
+    agent_id = manager.create_subagent(
+        "writer",
+        mock_provider,
+        session,
+        tool_context={"user_id": 1, "novel_id": "novel_1"},
+        memory_recorder_factory=FakeRecorder,
+    )
+
+    subagent = manager.subagents[agent_id]
+    recorder = created_recorders[0]
+    assert subagent.memory_recorder is recorder
+    assert recorder.kwargs == {
+        "user_id": 1,
+        "novel_id": "novel_1",
+        "agent_name": "writer",
+        "agent_instance_id": agent_id,
+        "session_id": "parent_session",
+    }
+
+
+def test_execute_subagent_records_raw_log_events():
+    provider = Mock()
+    provider.chat.return_value = SimpleNamespace(content="ok", tool_calls=None)
+    session = Session("parent_session")
+    manager = SubAgentManager()
+    created_recorders = []
+
+    class FakeRecorder:
+        def __init__(self, **kwargs):
+            self.records = []
+            created_recorders.append(self)
+
+        def record(self, event_type, payload):
+            self.records.append((event_type, payload))
+
+    agent_id = manager.create_subagent(
+        "writer",
+        provider,
+        session,
+        tool_context={"user_id": 1, "novel_id": "novel_1"},
+        memory_recorder_factory=FakeRecorder,
+    )
+
+    assert manager.execute_subagent(agent_id, "hello") == "ok"
+    assert created_recorders[0].records == [
+        ("user_message", {"content": "hello"}),
+        ("assistant_message", {"content": "ok"}),
+    ]
 
 
 def test_remove_subagent():

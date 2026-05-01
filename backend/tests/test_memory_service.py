@@ -41,6 +41,22 @@ def test_create_memory_validates_type_scope_and_importance(test_db):
     assert memory["tags"] == ["a", "b", "c"]
 
 
+def test_create_memory_accepts_cli_user_id_zero(test_db):
+    service = MemoryService(test_db)
+    novel_id = f"novel_{uuid4().hex}"
+
+    memory = service.remember(
+        0,
+        novel_id,
+        "main",
+        "CLI 本地记忆",
+        memory_type="note",
+    )
+
+    assert memory["user_id"] == 0
+    assert memory["novel_id"] == novel_id
+
+
 def test_search_formats_visible_memories(test_db):
     service = MemoryService(test_db)
     novel_id = f"novel_{uuid4().hex}"

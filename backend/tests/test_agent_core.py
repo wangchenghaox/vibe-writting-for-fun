@@ -226,6 +226,31 @@ priority: 5
         assert "list_memories" in tool_names
         assert "archive_memory" in tool_names
 
+    def test_agent_includes_memory_tools_with_cli_user_id_zero(self, session):
+        import app.tools.memory_tools  # noqa: F401
+
+        provider = Mock()
+        provider.chat.return_value = SimpleNamespace(content="done", tool_calls=None)
+        agent = AgentCore(
+            provider,
+            session,
+            tool_context={
+                "user_id": 0,
+                "novel_id": "default",
+                "agent_name": "main",
+                "agent_instance_id": "cli_session",
+            },
+        )
+
+        assert agent.chat("hi") == "done"
+
+        _messages, tools = provider.chat.call_args.args
+        tool_names = {schema["function"]["name"] for schema in tools}
+        assert "remember_memory" in tool_names
+        assert "search_memory" in tool_names
+        assert "list_memories" in tool_names
+        assert "archive_memory" in tool_names
+
     def test_agent_core_records_user_and_assistant_messages(self, session):
         provider = Mock()
         provider.chat.return_value = SimpleNamespace(content="回复", tool_calls=None)
