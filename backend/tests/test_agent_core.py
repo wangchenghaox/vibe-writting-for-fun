@@ -184,3 +184,133 @@ priority: 5
         assert allowed_tool_name in {schema["function"]["name"] for schema in tools}
         assert blocked_tool_name not in {schema["function"]["name"] for schema in tools}
         assert all("已启用技能" not in msg["content"] for msg in session.messages)
+
+    def test_agent_filters_memory_tools_without_memory_context(self, session):
+        import app.tools.memory_tools  # noqa: F401
+
+        provider = Mock()
+        provider.chat.return_value = SimpleNamespace(content="done", tool_calls=None)
+        agent = AgentCore(provider, session)
+
+        assert agent.chat("hi") == "done"
+
+        _messages, tools = provider.chat.call_args.args
+        tool_names = {schema["function"]["name"] for schema in tools}
+        assert "remember_memory" not in tool_names
+        assert "search_memory" not in tool_names
+        assert "list_memories" not in tool_names
+        assert "archive_memory" not in tool_names
+
+    def test_agent_includes_memory_tools_with_memory_context(self, session):
+        import app.tools.memory_tools  # noqa: F401
+
+        provider = Mock()
+        provider.chat.return_value = SimpleNamespace(content="done", tool_calls=None)
+        agent = AgentCore(
+            provider,
+            session,
+            tool_context={
+                "user_id": 1,
+                "novel_id": "novel_1",
+                "agent_name": "main",
+                "agent_instance_id": "instance_1",
+            },
+        )
+
+        assert agent.chat("hi") == "done"
+
+        _messages, tools = provider.chat.call_args.args
+        tool_names = {schema["function"]["name"] for schema in tools}
+        assert "remember_memory" in tool_names
+        assert "search_memory" in tool_names
+        assert "list_memories" in tool_names
+        assert "archive_memory" in tool_names
+
+    def test_agent_includes_memory_tools_with_cli_user_id_zero(self, session):
+        import app.tools.memory_tools  # noqa: F401
+
+        provider = Mock()
+        provider.chat.return_value = SimpleNamespace(content="done", tool_calls=None)
+        agent = AgentCore(
+            provider,
+            session,
+            tool_context={
+                "user_id": 0,
+                "novel_id": "default",
+                "agent_name": "main",
+                "agent_instance_id": "cli_session",
+            },
+        )
+
+        assert agent.chat("hi") == "done"
+
+        _messages, tools = provider.chat.call_args.args
+        tool_names = {schema["function"]["name"] for schema in tools}
+        assert "remember_memory" in tool_names
+        assert "search_memory" in tool_names
+        assert "list_memories" in tool_names
+        assert "archive_memory" in tool_names
+
+    def test_agent_core_records_user_and_assistant_messages(self, session):
+        provider = Mock()
+        provider.chat.return_value = SimpleNamespace(content="回复", tool_calls=None)
+
+        class FakeRecorder:
+            def __init__(self):
+                self.records = []
+
+            def record(self, event_type, payload):
+                self.records.append((event_type, payload))
+
+        recorder = FakeRecorder()
+        agent = AgentCore(provider, session, memory_recorder=recorder)
+
+        assert agent.chat("你好") == "回复"
+        assert [event_type for event_type, payload in recorder.records] == [
+            "user_message",
+            "assistant_message",
+        ]
+        assert recorder.records[0][1]["content"] == "你好"
+        assert recorder.records[1][1]["content"] == "回复"
+
+    def test_agent_core_records_tool_calls_and_results(self, session):
+        tool_name = f"memory_record_probe_{uuid4().hex}"
+
+        @tool(name=tool_name, description="Probe")
+        def memory_record_probe() -> str:
+            return "tool result"
+
+        provider = Mock()
+        provider.chat.side_effect = [
+            SimpleNamespace(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": tool_name, "arguments": "{}"},
+                    }
+                ],
+            ),
+            SimpleNamespace(content="done", tool_calls=None),
+        ]
+
+        class FakeRecorder:
+            def __init__(self):
+                self.records = []
+
+            def record(self, event_type, payload):
+                self.records.append((event_type, payload))
+
+        recorder = FakeRecorder()
+        agent = AgentCore(provider, session, memory_recorder=recorder)
+
+        assert agent.chat("run") == "done"
+        assert [event_type for event_type, payload in recorder.records] == [
+            "user_message",
+            "tool_call",
+            "tool_result",
+            "assistant_message",
+        ]
+        assert recorder.records[1][1]["name"] == tool_name
+        assert recorder.records[2][1]["result"] == "tool result"

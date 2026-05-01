@@ -58,6 +58,12 @@ class CommandHandler:
             return
 
         os.environ['CURRENT_NOVEL_ID'] = novel_id
+        if self.agent:
+            self.agent.session.context["novel_id"] = novel_id
+            self.agent.tool_context["novel_id"] = novel_id
+            if getattr(self.agent, "memory_recorder", None):
+                self.agent.memory_recorder.novel_id = novel_id
+
         meta_file = novel_dir / "meta.json"
         with open(meta_file, 'r', encoding='utf-8') as f:
             meta = json.load(f)

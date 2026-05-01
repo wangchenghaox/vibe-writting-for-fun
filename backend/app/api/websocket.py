@@ -58,7 +58,12 @@ async def websocket_chat(websocket: WebSocket, novel_id: int, token: str = Query
     def enqueue_event(event):
         loop.call_soon_threadsafe(event_queue.put_nowait, event)
 
-    agent_service = WebAgentService(novel.novel_id, on_event=enqueue_event)
+    agent_service = WebAgentService(
+        user_id=user.id,
+        novel_id=novel.novel_id,
+        agent_name="main",
+        on_event=enqueue_event,
+    )
     event_task = asyncio.create_task(send_events())
 
     try:

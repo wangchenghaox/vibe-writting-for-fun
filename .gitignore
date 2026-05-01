@@ -22,6 +22,9 @@ data/
 .idea/
 *.swp
 
+# Git worktrees
+.worktrees/
+
 # Logs
 logs/
 *.log

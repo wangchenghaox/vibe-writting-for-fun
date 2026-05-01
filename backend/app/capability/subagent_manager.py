@@ -1,21 +1,51 @@
 """
 SubAgent管理器 - 管理子代理的创建和执行
 """
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 class SubAgentManager:
     def __init__(self):
         self.subagents: Dict[str, Any] = {}
+        self._next_subagent_index = 0
 
-    def create_subagent(self, name: str, provider, session) -> str:
+    def create_subagent(
+        self,
+        name: str,
+        provider,
+        session,
+        tool_context: dict | None = None,
+        memory_recorder_factory=None,
+    ) -> str:
         """创建子代理"""
         from ..agent.core import AgentCore
+        from ..memory.event_recorder import MemoryEventRecorder
 
-        subagent = AgentCore(provider, session)
-        subagent_id = f"subagent_{name}_{len(self.subagents)}"
+        index = self._next_subagent_index
+        self._next_subagent_index += 1
+        subagent_id = f"subagent_{name}_{index}"
+        context = dict(tool_context or {})
+        context["agent_name"] = name
+        context["agent_instance_id"] = subagent_id
+        session.context.update(context)
+
+        recorder_factory = memory_recorder_factory or MemoryEventRecorder
+        memory_recorder = recorder_factory(
+            user_id=context.get("user_id"),
+            novel_id=context.get("novel_id"),
+            agent_name=name,
+            agent_instance_id=subagent_id,
+            session_id=session.id,
+        )
+        subagent = AgentCore(
+            provider,
+            session,
+            tool_context=context,
+            memory_recorder=memory_recorder,
+        )
         self.subagents[subagent_id] = subagent
 
         logger.info(f"创建子代理: {subagent_id}")

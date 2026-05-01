@@ -31,6 +31,10 @@ def test_web_agent_import_registers_all_novel_tools():
         "load_outline",
         "review_chapter",
         "web_search",
+        "remember_memory",
+        "search_memory",
+        "list_memories",
+        "archive_memory",
     }.issubset(tool_names)
 
 
@@ -40,7 +44,7 @@ def test_web_agent_does_not_mutate_current_novel_env(monkeypatch):
     monkeypatch.setenv("CURRENT_NOVEL_ID", "original")
     monkeypatch.setattr(web_agent, "create_provider", lambda: Mock())
 
-    web_agent.WebAgentService("web-novel")
+    web_agent.WebAgentService(user_id=1, novel_id="web-novel")
 
     assert os.environ["CURRENT_NOVEL_ID"] == "original"
 
@@ -50,15 +54,20 @@ def test_web_agent_uses_unique_session_per_connection(monkeypatch):
 
     monkeypatch.setattr(web_agent, "create_provider", lambda: Mock())
 
-    first = web_agent.WebAgentService("shared-novel")
-    second = web_agent.WebAgentService("shared-novel")
+    first = web_agent.WebAgentService(user_id=1, novel_id="shared-novel")
+    second = web_agent.WebAgentService(user_id=1, novel_id="shared-novel")
 
     try:
         assert first.session.id != second.session.id
         assert first.session.context["novel_id"] == "shared-novel"
         assert second.session.context["novel_id"] == "shared-novel"
+        assert first.session.context["user_id"] == 1
+        assert first.session.context["agent_name"] == "main"
         assert first.agent.tool_context["novel_id"] == "shared-novel"
         assert second.agent.tool_context["novel_id"] == "shared-novel"
+        assert first.agent.tool_context["user_id"] == 1
+        assert first.agent.tool_context["agent_name"] == "main"
+        assert first.agent.tool_context["agent_instance_id"] == first.session.id
     finally:
         first.close()
         second.close()
@@ -79,7 +88,7 @@ def test_web_agent_chat_forwards_streaming_deltas(monkeypatch):
     events = []
     monkeypatch.setattr(web_agent, "create_provider", lambda: FakeProvider())
 
-    service = web_agent.WebAgentService("stream-novel", on_event=events.append)
+    service = web_agent.WebAgentService(user_id=1, novel_id="stream-novel", on_event=events.append)
     try:
         assert service.chat("hello") == "你好"
     finally:
@@ -192,8 +201,8 @@ async def test_websocket_event_callback_is_thread_safe(monkeypatch, test_db):
     class FakeAgentService:
         initialized_with = []
 
-        def __init__(self, novel_id, on_event=None):
-            self.initialized_with.append(novel_id)
+        def __init__(self, user_id, novel_id, agent_name="main", agent_instance_id=None, on_event=None):
+            self.initialized_with.append((user_id, novel_id, agent_name))
             self.on_event = on_event
 
         def chat(self, message):
@@ -215,7 +224,7 @@ async def test_websocket_event_callback_is_thread_safe(monkeypatch, test_db):
         db=test_db,
     )
 
-    assert FakeAgentService.initialized_with == [novel.novel_id]
+    assert FakeAgentService.initialized_with == [(user.id, novel.novel_id, "main")]
     assert fake_ws.sent[0]["type"] == "tool_called"
     assert fake_ws.sent[-1] == {"type": "message_sent", "content": "ok"}
     assert all("no running event loop" not in str(msg) for msg in fake_ws.sent)

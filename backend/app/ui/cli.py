@@ -3,6 +3,7 @@ import os
 from ..agent.core import AgentCore
 from ..agent.session import Session
 from ..llm.config import create_provider
+from ..memory.event_recorder import MemoryEventRecorder
 from ..storage.session_store import SessionStore
 from ..ui.rich_display import RichDisplay
 from ..tools import chapter_tools, outline_tools, novel_tools, review_tools
@@ -24,7 +25,22 @@ class CLI:
 
         session_id = str(uuid.uuid4())
         session = Session(session_id)
-        agent = AgentCore(self.provider, session)
+        session.context["user_id"] = 0
+        session.context["novel_id"] = os.getenv("CURRENT_NOVEL_ID", "default")
+        session.context["agent_name"] = "main"
+        session.context["agent_instance_id"] = session_id
+        agent = AgentCore(
+            self.provider,
+            session,
+            tool_context=dict(session.context),
+            memory_recorder=MemoryEventRecorder(
+                user_id=0,
+                novel_id=session.context["novel_id"],
+                agent_name="main",
+                agent_instance_id=session_id,
+                session_id=session_id,
+            ),
+        )
 
         command_handler = CommandHandler(self.display.console, agent)
 

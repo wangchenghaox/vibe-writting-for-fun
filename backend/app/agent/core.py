@@ -13,6 +13,15 @@ from ..events.event_types import Event, EventType
 
 logger = logging.getLogger(__name__)
 
+MEMORY_TOOL_NAMES = {
+    "remember_memory",
+    "search_memory",
+    "list_memories",
+    "archive_memory",
+}
+MEMORY_CONTEXT_KEYS = ("user_id", "novel_id", "agent_name")
+
+
 class AgentCore:
     def __init__(
         self,
@@ -20,11 +29,13 @@ class AgentCore:
         session: Session,
         tool_context: Optional[dict] = None,
         skill_loader: Optional[SkillLoader] = None,
+        memory_recorder=None,
         max_tool_rounds: int = 8,
     ):
         self.provider = provider
         self.session = session
         self.tool_context = tool_context or {}
+        self.memory_recorder = memory_recorder
         self.max_tool_rounds = max_tool_rounds
         self.event_bus = EventBus()
         self.context_compressor = ContextCompressor()
@@ -32,9 +43,19 @@ class AgentCore:
         self.subagent_manager = SubAgentManager()
         self.task_manager = TaskManager()
 
+    def _record_memory_event(self, event_type: str, payload: dict):
+        if self.memory_recorder is None:
+            return
+
+        try:
+            self.memory_recorder.record(event_type, payload)
+        except Exception:
+            logger.warning("Failed to record memory event: %s", event_type, exc_info=True)
+
     def _start_turn(self, user_message: str):
         self.session.add_message("user", user_message)
         self.event_bus.publish(Event(EventType.MESSAGE_RECEIVED, {"content": user_message}, self.session.id))
+        self._record_memory_event("user_message", {"content": user_message})
 
         messages = self.session.get_messages()
 
@@ -43,6 +64,7 @@ class AgentCore:
             messages = self.context_compressor.compress(messages)
             self.session.messages = messages
             self.event_bus.publish(Event(EventType.CONTEXT_COMPRESSED, {"count": len(messages)}, self.session.id))
+            self._record_memory_event("context_compressed", {"count": len(messages)})
 
         return messages
 
@@ -58,7 +80,20 @@ class AgentCore:
         for skill in skills:
             allowed_tools.extend(skill.allowed_tools)
 
-        return get_tool_schemas(allowed_names=allowed_tools or None)
+        tools = get_tool_schemas(allowed_names=allowed_tools or None)
+        if self._has_memory_context():
+            return tools
+
+        return [
+            schema for schema in tools
+            if schema["function"]["name"] not in MEMORY_TOOL_NAMES
+        ]
+
+    def _has_memory_context(self):
+        return all(
+            self.tool_context.get(key) is not None and self.tool_context.get(key) != ""
+            for key in MEMORY_CONTEXT_KEYS
+        )
 
     def _inject_skill_prompt(self, messages: list[dict], skills: list[SkillDefinition]):
         prompt = self.skill_loader.build_prompt(skills)
@@ -85,10 +120,12 @@ class AgentCore:
             tool_args = json.loads(tc["function"]["arguments"])
 
             self.event_bus.publish(Event(EventType.TOOL_CALLED, {"name": tool_name, "args": tool_args}, self.session.id))
+            self._record_memory_event("tool_call", {"name": tool_name, "args": tool_args})
 
             result = execute_tool(tool_name, tool_args, context=self.tool_context)
 
             self.event_bus.publish(Event(EventType.TOOL_RESULT, {"name": tool_name, "result": result}, self.session.id))
+            self._record_memory_event("tool_result", {"name": tool_name, "result": str(result)})
 
             tool_call_id = tc.get("id") or tc.get("tool_call_id")
             if not tool_call_id or tool_call_id.strip() == "":
@@ -116,10 +153,12 @@ class AgentCore:
             else:
                 self.session.add_message("assistant", response.content)
                 self.event_bus.publish(Event(EventType.MESSAGE_SENT, {"content": response.content}, self.session.id))
+                self._record_memory_event("assistant_message", {"content": response.content})
                 return response.content
 
         message = f"Exceeded maximum tool rounds: {self.max_tool_rounds}"
         self.event_bus.publish(Event(EventType.ERROR, {"message": message}, self.session.id))
+        self._record_memory_event("error", {"message": message})
         raise RuntimeError(message)
 
     def chat_stream(self, user_message: str) -> Iterator[str]:
@@ -149,8 +188,10 @@ class AgentCore:
             else:
                 self.session.add_message("assistant", response.content)
                 self.event_bus.publish(Event(EventType.MESSAGE_SENT, {"content": response.content}, self.session.id))
+                self._record_memory_event("assistant_message", {"content": response.content})
                 return
 
         message = f"Exceeded maximum tool rounds: {self.max_tool_rounds}"
         self.event_bus.publish(Event(EventType.ERROR, {"message": message}, self.session.id))
+        self._record_memory_event("error", {"message": message})
         raise RuntimeError(message)
