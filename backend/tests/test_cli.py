@@ -34,12 +34,15 @@ def test_cli_streams_assistant_response(monkeypatch):
     created_agents = []
 
     class FakeAgent:
-        def __init__(self, provider, session):
+        def __init__(self, provider, session, tool_context=None, memory_recorder=None):
             self.event_bus = type(
                 "FakeEventBus",
                 (),
                 {"_subscribers": {}, "subscribe": lambda *args, **kwargs: None},
             )()
+            self.session = session
+            self.tool_context = tool_context or {}
+            self.memory_recorder = memory_recorder
             self.chat_calls = []
             self.chat_stream_calls = []
             created_agents.append(self)
@@ -71,6 +74,9 @@ def test_cli_streams_assistant_response(monkeypatch):
     agent = created_agents[0]
     assert agent.chat_calls == []
     assert agent.chat_stream_calls == ["hello"]
+    assert agent.tool_context["user_id"] == 0
+    assert agent.tool_context["agent_name"] == "main"
+    assert agent.tool_context["agent_instance_id"] == saved_sessions[0].id
     assert [args[0] for args, kwargs in fake_display.console.prints if kwargs.get("end") == ""] == [
         "\n[bold blue]Assistant:[/bold blue] ",
         "你",
