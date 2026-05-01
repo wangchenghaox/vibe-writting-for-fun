@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 class SubAgentManager:
     def __init__(self):
         self.subagents: Dict[str, Any] = {}
+        self._next_subagent_index = 0
 
     def create_subagent(
         self,
@@ -21,10 +22,12 @@ class SubAgentManager:
         """创建子代理"""
         from ..agent.core import AgentCore
 
-        subagent_id = f"subagent_{name}_{len(self.subagents)}"
+        index = self._next_subagent_index
+        self._next_subagent_index += 1
+        subagent_id = f"subagent_{name}_{index}"
         context = dict(tool_context or {})
-        context.setdefault("agent_name", name)
-        context.setdefault("agent_instance_id", subagent_id)
+        context["agent_name"] = name
+        context["agent_instance_id"] = subagent_id
         session.context.update(context)
 
         subagent = AgentCore(provider, session, tool_context=context)
