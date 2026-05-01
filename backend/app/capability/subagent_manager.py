@@ -1,21 +1,33 @@
 """
 SubAgent管理器 - 管理子代理的创建和执行
 """
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 class SubAgentManager:
     def __init__(self):
         self.subagents: Dict[str, Any] = {}
 
-    def create_subagent(self, name: str, provider, session) -> str:
+    def create_subagent(
+        self,
+        name: str,
+        provider,
+        session,
+        tool_context: dict | None = None,
+    ) -> str:
         """创建子代理"""
         from ..agent.core import AgentCore
 
-        subagent = AgentCore(provider, session)
         subagent_id = f"subagent_{name}_{len(self.subagents)}"
+        context = dict(tool_context or {})
+        context.setdefault("agent_name", name)
+        context.setdefault("agent_instance_id", subagent_id)
+        session.context.update(context)
+
+        subagent = AgentCore(provider, session, tool_context=context)
         self.subagents[subagent_id] = subagent
 
         logger.info(f"创建子代理: {subagent_id}")
