@@ -74,6 +74,7 @@ def test_query_memories_respects_agent_private_and_novel_shared_scope(test_db):
 def test_query_memories_filters_by_user_novel_keyword_type_tags_and_limit(test_db):
     repo = MemoryRepository(test_db)
     novel_id = f"novel_{uuid4().hex}"
+    other_novel_id = f"novel_{uuid4().hex}"
 
     match = repo.create_memory(
         user_id=2,
@@ -100,6 +101,17 @@ def test_query_memories_filters_by_user_novel_keyword_type_tags_and_limit(test_d
     repo.create_memory(
         user_id=3,
         novel_id=novel_id,
+        agent_name="writer",
+        scope="agent",
+        layer="explicit",
+        memory_type="character",
+        content="男主害怕深水",
+        tags=["男主", "弱点"],
+        importance=5,
+    )
+    repo.create_memory(
+        user_id=2,
+        novel_id=other_novel_id,
         agent_name="writer",
         scope="agent",
         layer="explicit",
