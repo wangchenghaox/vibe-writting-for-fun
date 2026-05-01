@@ -184,3 +184,44 @@ priority: 5
         assert allowed_tool_name in {schema["function"]["name"] for schema in tools}
         assert blocked_tool_name not in {schema["function"]["name"] for schema in tools}
         assert all("已启用技能" not in msg["content"] for msg in session.messages)
+
+    def test_agent_filters_memory_tools_without_memory_context(self, session):
+        import app.tools.memory_tools  # noqa: F401
+
+        provider = Mock()
+        provider.chat.return_value = SimpleNamespace(content="done", tool_calls=None)
+        agent = AgentCore(provider, session)
+
+        assert agent.chat("hi") == "done"
+
+        _messages, tools = provider.chat.call_args.args
+        tool_names = {schema["function"]["name"] for schema in tools}
+        assert "remember_memory" not in tool_names
+        assert "search_memory" not in tool_names
+        assert "list_memories" not in tool_names
+        assert "archive_memory" not in tool_names
+
+    def test_agent_includes_memory_tools_with_memory_context(self, session):
+        import app.tools.memory_tools  # noqa: F401
+
+        provider = Mock()
+        provider.chat.return_value = SimpleNamespace(content="done", tool_calls=None)
+        agent = AgentCore(
+            provider,
+            session,
+            tool_context={
+                "user_id": 1,
+                "novel_id": "novel_1",
+                "agent_name": "main",
+                "agent_instance_id": "instance_1",
+            },
+        )
+
+        assert agent.chat("hi") == "done"
+
+        _messages, tools = provider.chat.call_args.args
+        tool_names = {schema["function"]["name"] for schema in tools}
+        assert "remember_memory" in tool_names
+        assert "search_memory" in tool_names
+        assert "list_memories" in tool_names
+        assert "archive_memory" in tool_names

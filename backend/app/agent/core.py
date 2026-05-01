@@ -13,6 +13,15 @@ from ..events.event_types import Event, EventType
 
 logger = logging.getLogger(__name__)
 
+MEMORY_TOOL_NAMES = {
+    "remember_memory",
+    "search_memory",
+    "list_memories",
+    "archive_memory",
+}
+MEMORY_CONTEXT_KEYS = ("user_id", "novel_id", "agent_name")
+
+
 class AgentCore:
     def __init__(
         self,
@@ -58,7 +67,17 @@ class AgentCore:
         for skill in skills:
             allowed_tools.extend(skill.allowed_tools)
 
-        return get_tool_schemas(allowed_names=allowed_tools or None)
+        tools = get_tool_schemas(allowed_names=allowed_tools or None)
+        if self._has_memory_context():
+            return tools
+
+        return [
+            schema for schema in tools
+            if schema["function"]["name"] not in MEMORY_TOOL_NAMES
+        ]
+
+    def _has_memory_context(self):
+        return all(self.tool_context.get(key) for key in MEMORY_CONTEXT_KEYS)
 
     def _inject_skill_prompt(self, messages: list[dict], skills: list[SkillDefinition]):
         prompt = self.skill_loader.build_prompt(skills)
