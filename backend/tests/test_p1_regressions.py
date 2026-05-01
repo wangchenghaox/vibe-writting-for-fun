@@ -31,6 +31,10 @@ def test_web_agent_import_registers_all_novel_tools():
         "load_outline",
         "review_chapter",
         "web_search",
+        "remember_memory",
+        "search_memory",
+        "list_memories",
+        "archive_memory",
     }.issubset(tool_names)
 
 
