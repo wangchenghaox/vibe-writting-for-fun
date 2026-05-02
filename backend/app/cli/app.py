@@ -1,8 +1,10 @@
 import uuid
 import os
 import errno
+from pathlib import Path
 from ..agent.core import AgentCore
 from ..agent.session import Session
+from ..core.config import settings
 from ..db.init import init_db
 from ..llm.config import create_provider
 from ..memory.event_recorder import MemoryEventRecorder
@@ -13,11 +15,14 @@ from ..utils.logging_config import setup_logging
 from .commands import CommandHandler
 
 class CLI:
-    def __init__(self):
+    def __init__(self, memory_enabled=None, workdir=None):
         # 初始化日志
         os.makedirs('logs', exist_ok=True)
         setup_logging()
-        init_db()
+        self.workdir = self._configure_workdir(workdir)
+        self.memory_enabled = settings.MEMORY_ENABLED if memory_enabled is None else memory_enabled
+        if self.memory_enabled:
+            init_db()
 
         self.display = RichDisplay()
         self.session_store = SessionStore()
@@ -29,23 +34,28 @@ class CLI:
         session_id = str(uuid.uuid4())
         session = Session(session_id)
         session.context["user_id"] = 0
-        session.context["novel_id"] = os.getenv("CURRENT_NOVEL_ID", "default")
+        session.context["workdir"] = str(self.workdir)
+        session.context["novel_id"] = self.workdir.name or "workspace"
         session.context["agent_name"] = "main"
         session.context["agent_instance_id"] = session_id
-        agent = AgentCore(
-            self.provider,
-            session,
-            tool_context=dict(session.context),
-            memory_recorder=MemoryEventRecorder(
+        memory_recorder = None
+        if self.memory_enabled:
+            memory_recorder = MemoryEventRecorder(
                 user_id=0,
                 novel_id=session.context["novel_id"],
                 agent_name="main",
                 agent_instance_id=session_id,
                 session_id=session_id,
-            ),
+            )
+        agent = AgentCore(
+            self.provider,
+            session,
+            tool_context=dict(session.context),
+            memory_recorder=memory_recorder,
+            memory_enabled=self.memory_enabled,
         )
 
-        command_handler = CommandHandler(self.display.console, agent)
+        command_handler = CommandHandler(self.display.console, agent, workdir=self.workdir)
 
         # 订阅事件显示思考过程
         from ..events.event_types import EventType
@@ -124,3 +134,16 @@ class CLI:
                 self.display.console.print(f"[red]Error: {e}[/red]")
             except Exception as e:
                 self.display.console.print(f"[red]Error: {e}[/red]")
+
+    def _configure_workdir(self, workdir=None) -> Path:
+        configured = workdir if workdir is not None else settings.WORKDIR
+        if configured is None:
+            configured = Path(settings.DATA_DIR) / "novels"
+
+        root = Path(configured).expanduser()
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        root.mkdir(parents=True, exist_ok=True)
+        resolved = root.resolve(strict=False)
+        settings.WORKDIR = resolved
+        return resolved

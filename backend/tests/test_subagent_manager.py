@@ -64,7 +64,30 @@ def test_create_subagent_ids_do_not_collide_after_removal():
     assert first_editor_id != second_editor_id
 
 
-def test_create_subagent_attaches_recorder_with_runtime_identity():
+def test_create_subagent_does_not_attach_recorder_by_default():
+    mock_provider = Mock()
+    session = Session("parent_session")
+    manager = SubAgentManager()
+    created_recorders = []
+
+    class FakeRecorder:
+        def __init__(self, **kwargs):
+            created_recorders.append(self)
+
+    agent_id = manager.create_subagent(
+        "writer",
+        mock_provider,
+        session,
+        tool_context={"user_id": 1, "novel_id": "novel_1"},
+        memory_recorder_factory=FakeRecorder,
+    )
+
+    subagent = manager.subagents[agent_id]
+    assert subagent.memory_recorder is None
+    assert created_recorders == []
+
+
+def test_create_subagent_attaches_recorder_with_runtime_identity_when_memory_enabled():
     mock_provider = Mock()
     session = Session("parent_session")
     manager = SubAgentManager()
@@ -85,6 +108,7 @@ def test_create_subagent_attaches_recorder_with_runtime_identity():
         session,
         tool_context={"user_id": 1, "novel_id": "novel_1"},
         memory_recorder_factory=FakeRecorder,
+        memory_enabled=True,
     )
 
     subagent = manager.subagents[agent_id]
@@ -99,7 +123,7 @@ def test_create_subagent_attaches_recorder_with_runtime_identity():
     }
 
 
-def test_execute_subagent_records_raw_log_events():
+def test_execute_subagent_records_raw_log_events_when_memory_enabled():
     provider = Mock()
     provider.chat.return_value = SimpleNamespace(content="ok", tool_calls=None)
     session = Session("parent_session")
@@ -120,6 +144,7 @@ def test_execute_subagent_records_raw_log_events():
         session,
         tool_context={"user_id": 1, "novel_id": "novel_1"},
         memory_recorder_factory=FakeRecorder,
+        memory_enabled=True,
     )
 
     assert manager.execute_subagent(agent_id, "hello") == "ok"

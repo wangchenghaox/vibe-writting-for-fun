@@ -37,12 +37,14 @@ class AgentCore:
         tool_context: Optional[dict] = None,
         skill_loader: Optional[SkillLoader] = None,
         memory_recorder=None,
+        memory_enabled: bool = False,
         max_tool_rounds: int = 8,
     ):
         self.provider = provider
         self.session = session
         self.tool_context = tool_context or {}
         self.memory_recorder = memory_recorder
+        self.memory_enabled = memory_enabled
         self.max_tool_rounds = max_tool_rounds
         self.event_bus = EventBus()
         self.context_compressor = ContextCompressor()
@@ -51,7 +53,7 @@ class AgentCore:
         self.task_manager = TaskManager()
 
     def _record_memory_event(self, event_type: str, payload: dict):
-        if self.memory_recorder is None:
+        if not self.memory_enabled or self.memory_recorder is None:
             return
 
         try:
@@ -88,7 +90,7 @@ class AgentCore:
             allowed_tools.extend(skill.allowed_tools)
 
         tools = get_tool_schemas(allowed_names=allowed_tools or None)
-        if self._has_memory_context():
+        if self.memory_enabled and self._has_memory_context():
             return tools
 
         return [

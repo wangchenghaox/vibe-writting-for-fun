@@ -17,13 +17,13 @@ def collect_completion_texts(completer, text):
 def test_completes_slash_commands():
     completer = NovelCommandCompleter()
 
-    completions = collect_completion_texts(completer, "/l")
+    completions = collect_completion_texts(completer, "/h")
 
-    assert "/load" in completions
-    assert "/list" in completions
+    assert "/help" in completions
+    assert "/load" not in completions
 
 
-def test_completes_novel_ids_for_load_command(tmp_path):
+def test_load_command_no_longer_completes_novel_ids(tmp_path):
     novels_dir = tmp_path / "novels"
     novel_dir = novels_dir / "novel_alpha"
     novel_dir.mkdir(parents=True)
@@ -36,10 +36,10 @@ def test_completes_novel_ids_for_load_command(tmp_path):
 
     completions = collect_completion_texts(completer, "/load novel_")
 
-    assert "novel_alpha" in completions
+    assert completions == []
 
 
-def test_load_command_without_prefix_lists_novel_ids(tmp_path):
+def test_load_command_without_prefix_does_not_list_novel_ids(tmp_path):
     novels_dir = tmp_path / "novels"
     novel_dir = novels_dir / "novel_beta"
     novel_dir.mkdir(parents=True)
@@ -52,4 +52,4 @@ def test_load_command_without_prefix_lists_novel_ids(tmp_path):
 
     completions = collect_completion_texts(completer, "/load ")
 
-    assert "novel_beta" in completions
+    assert completions == []

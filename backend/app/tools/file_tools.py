@@ -15,7 +15,18 @@ def _skills_root() -> Path:
     return BACKEND_ROOT / "skills"
 
 
+def _workdir_root() -> Optional[Path]:
+    workdir = getattr(settings, "WORKDIR", None)
+    if not workdir:
+        return None
+    return Path(workdir).expanduser().resolve(strict=False)
+
+
 def _allowed_roots() -> list[Path]:
+    workdir = _workdir_root()
+    if workdir is not None:
+        return [workdir]
+
     return [
         (Path(settings.DATA_DIR) / "novels").resolve(),
         _skills_root().resolve(),
@@ -24,6 +35,12 @@ def _allowed_roots() -> list[Path]:
 
 def _path_candidates(path: str) -> list[Path]:
     raw = Path(path)
+    workdir = _workdir_root()
+    if workdir is not None:
+        if raw.is_absolute():
+            return [raw]
+        return [workdir / raw]
+
     if raw.is_absolute():
         return [raw]
 
@@ -48,6 +65,14 @@ def _resolve_safe_path(path: str) -> tuple[Optional[Path], Optional[str]]:
 
 
 def _display_path(path: Path) -> str:
+    workdir = _workdir_root()
+    if workdir is not None:
+        try:
+            relative = path.resolve(strict=False).relative_to(workdir)
+        except ValueError:
+            return str(path)
+        return "." if str(relative) == "." else str(relative)
+
     for label, root in (
         ("novels", (Path(settings.DATA_DIR) / "novels").resolve()),
         ("skills", _skills_root().resolve()),
