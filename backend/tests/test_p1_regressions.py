@@ -25,10 +25,10 @@ def test_web_agent_import_registers_all_novel_tools():
 
     assert {
         "create_novel",
-        "save_chapter",
-        "load_chapter",
-        "save_outline",
-        "load_outline",
+        "get_novel",
+        "save_novel_document",
+        "load_novel_document",
+        "list_novel_documents",
         "review_chapter",
         "web_search",
         "remember_memory",
@@ -36,6 +36,15 @@ def test_web_agent_import_registers_all_novel_tools():
         "list_memories",
         "archive_memory",
     }.issubset(tool_names)
+    assert {
+        "list_novels",
+        "get_novel_info",
+        "save_chapter",
+        "load_chapter",
+        "list_chapters",
+        "save_outline",
+        "load_outline",
+    }.isdisjoint(tool_names)
 
 
 def test_web_agent_does_not_mutate_current_novel_env(monkeypatch):

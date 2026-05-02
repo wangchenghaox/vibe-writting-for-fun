@@ -1,5 +1,6 @@
 import json
 import logging
+from dataclasses import dataclass
 from typing import Iterator, Optional
 from ..llm.provider import LLMProvider, Response
 from ..agent.session import Session
@@ -20,6 +21,12 @@ MEMORY_TOOL_NAMES = {
     "archive_memory",
 }
 MEMORY_CONTEXT_KEYS = ("user_id", "novel_id", "agent_name")
+
+
+@dataclass
+class ToolHandlingOutcome:
+    messages: list[dict]
+    recovery_message: Optional[str] = None
 
 
 class AgentCore:
@@ -107,6 +114,29 @@ class AgentCore:
         prepared.insert(insert_at, {"role": "system", "content": prompt})
         return prepared
 
+    def _is_repeated_missing_argument_error(self, tool_name: str, result: str) -> bool:
+        if not result.startswith(f"Tool {tool_name} missing required argument(s): "):
+            return False
+
+        return any(
+            msg.get("role") == "tool"
+            and msg.get("name") == tool_name
+            and msg.get("content") == result
+            for msg in self.session.messages
+        )
+
+    def _missing_argument_recovery_message(self, tool_name: str, result: str) -> str:
+        missing_args = result.split("missing required argument(s): ", 1)[-1]
+        return (
+            f"工具调用连续失败：{tool_name} 缺少必填参数 {missing_args}。"
+            "请先提供完整内容，或让我先生成完整正文后再保存。"
+        )
+
+    def _finish_assistant_message(self, content: str):
+        self.session.add_message("assistant", content)
+        self.event_bus.publish(Event(EventType.MESSAGE_SENT, {"content": content}, self.session.id))
+        self._record_memory_event("assistant_message", {"content": content})
+
     def _handle_tool_calls(self, response: Response):
         # 显示模型的思考内容
         if response.content:
@@ -123,6 +153,8 @@ class AgentCore:
             self._record_memory_event("tool_call", {"name": tool_name, "args": tool_args})
 
             result = execute_tool(tool_name, tool_args, context=self.tool_context)
+            result_text = str(result)
+            repeated_missing_arg_error = self._is_repeated_missing_argument_error(tool_name, result_text)
 
             self.event_bus.publish(Event(EventType.TOOL_RESULT, {"name": tool_name, "result": result}, self.session.id))
             self._record_memory_event("tool_result", {"name": tool_name, "result": str(result)})
@@ -131,12 +163,17 @@ class AgentCore:
             if not tool_call_id or tool_call_id.strip() == "":
                 tool_call_id = f"fallback_{tool_name}_{idx}"
 
-            self.session.add_message("tool", str(result), tool_call_id=tool_call_id, name=tool_name)
+            self.session.add_message("tool", result_text, tool_call_id=tool_call_id, name=tool_name)
+
+            if repeated_missing_arg_error:
+                recovery_message = self._missing_argument_recovery_message(tool_name, result_text)
+                self._finish_assistant_message(recovery_message)
+                return ToolHandlingOutcome(self.session.get_messages(), recovery_message=recovery_message)
 
         messages = self.session.get_messages()
         logger.debug(f"Sending {len(messages)} messages to API")
         logger.debug(f"Last 2 messages: {messages[-2:]}")
-        return messages
+        return ToolHandlingOutcome(messages)
 
     def chat(self, user_message: str) -> str:
         skills = self._select_skills(user_message)
@@ -148,12 +185,13 @@ class AgentCore:
             response = self.provider.chat(messages, tools)
 
             if response.tool_calls:
-                messages = self._handle_tool_calls(response)
+                outcome = self._handle_tool_calls(response)
+                if outcome.recovery_message:
+                    return outcome.recovery_message
+                messages = outcome.messages
                 messages = self._inject_skill_prompt(messages, skills)
             else:
-                self.session.add_message("assistant", response.content)
-                self.event_bus.publish(Event(EventType.MESSAGE_SENT, {"content": response.content}, self.session.id))
-                self._record_memory_event("assistant_message", {"content": response.content})
+                self._finish_assistant_message(response.content)
                 return response.content
 
         message = f"Exceeded maximum tool rounds: {self.max_tool_rounds}"
@@ -183,12 +221,14 @@ class AgentCore:
                 response = Response(content="", tool_calls=None, finish_reason="stop")
 
             if response.tool_calls:
-                messages = self._handle_tool_calls(response)
+                outcome = self._handle_tool_calls(response)
+                if outcome.recovery_message:
+                    yield outcome.recovery_message
+                    return
+                messages = outcome.messages
                 messages = self._inject_skill_prompt(messages, skills)
             else:
-                self.session.add_message("assistant", response.content)
-                self.event_bus.publish(Event(EventType.MESSAGE_SENT, {"content": response.content}, self.session.id))
-                self._record_memory_event("assistant_message", {"content": response.content})
+                self._finish_assistant_message(response.content)
                 return
 
         message = f"Exceeded maximum tool rounds: {self.max_tool_rounds}"

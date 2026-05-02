@@ -2,6 +2,7 @@ import uuid
 import os
 from ..agent.core import AgentCore
 from ..agent.session import Session
+from ..db.init import init_db
 from ..llm.config import create_provider
 from ..memory.event_recorder import MemoryEventRecorder
 from ..storage.session_store import SessionStore
@@ -15,6 +16,7 @@ class CLI:
         # 初始化日志
         os.makedirs('logs', exist_ok=True)
         setup_logging()
+        init_db()
 
         self.display = RichDisplay()
         self.session_store = SessionStore()

@@ -62,6 +62,19 @@ def get_tool_schemas(allowed_names: Optional[Sequence[str]] = None) -> List[Dict
         if name in allowed
     ]
 
+
+def _missing_required_arguments(entry: Dict[str, Any], call_args: Dict[str, Any]) -> List[str]:
+    missing = []
+    for param_name, param in entry["signature"].parameters.items():
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        if param.default != inspect.Parameter.empty:
+            continue
+        if param_name not in call_args:
+            missing.append(param_name)
+    return missing
+
+
 def execute_tool(name: str, arguments: Dict[str, Any], context: Dict[str, Any] = None) -> Any:
     if name not in _tool_registry:
         raise ValueError(f"Tool {name} not found")
@@ -80,5 +93,9 @@ def execute_tool(name: str, arguments: Dict[str, Any], context: Dict[str, Any] =
                 and (key not in call_args or call_args[key] in (None, ""))
             ):
                 call_args[key] = value
+
+    missing = _missing_required_arguments(entry, call_args)
+    if missing:
+        return f"Tool {name} missing required argument(s): {', '.join(missing)}"
 
     return entry["func"](**call_args)
