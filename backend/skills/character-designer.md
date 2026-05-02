@@ -12,7 +12,6 @@ triggers:
   - 反派
   - 主角
 allowed_tools:
-  - get_novel
   - read_file
   - write_file
   - edit_file
@@ -32,7 +31,7 @@ priority: 15
 
 ## 上下文读取
 
-- 如用户指定小说，先用 `get_novel` 获取小说信息。
+- 如用户指定小说，优先使用会话中的 `novel_id` 定位 `novels/{novel_id}/` 下的 Markdown 文件。
 - 如角色需要参考已有大纲，使用 `search_files` 或 `list_files` 查找 `novels/{novel_id}/outlines/*.md`，再用 `read_file` 读取。
 - 如角色需要参考已有角色文件，查找 `novels/{novel_id}/characters/*.md`。
 - 如果已有设定不足以判断角色定位，先询问角色功能或故事题材。

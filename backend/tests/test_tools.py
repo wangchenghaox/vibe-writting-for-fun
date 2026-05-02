@@ -49,7 +49,7 @@ def test_tool_schema_filtering_by_allowed_names():
     assert [schema["function"]["name"] for schema in schemas] == ["allowed_schema_tool"]
 
 
-def test_domain_tools_expose_slim_schema_set():
+def test_json_domain_tools_are_not_exposed_to_agent_schema():
     tool_names = {schema["function"]["name"] for schema in get_tool_schemas()}
 
     assert {
@@ -58,8 +58,7 @@ def test_domain_tools_expose_slim_schema_set():
         "save_novel_document",
         "load_novel_document",
         "list_novel_documents",
-    }.issubset(tool_names)
-    assert {
+        "review_chapter",
         "list_novels",
         "get_novel_info",
         "save_outline",
@@ -69,8 +68,17 @@ def test_domain_tools_expose_slim_schema_set():
         "list_chapters",
     }.isdisjoint(tool_names)
 
+    assert {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_files",
+        "search_files",
+        "grep_files",
+    }.issubset(tool_names)
 
-def test_slim_domain_tools_manage_novels_and_documents(tmp_path, monkeypatch):
+
+def test_legacy_json_helpers_manage_novels_and_documents(tmp_path, monkeypatch):
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "DATA_DIR", tmp_path)
@@ -114,7 +122,7 @@ def test_slim_domain_tools_manage_novels_and_documents(tmp_path, monkeypatch):
     assert json.loads(list_novel_documents("chapter", novel_id="novel_slim")) == ["chapter_1"]
 
 
-def test_slim_domain_tools_return_error_for_invalid_document_type(tmp_path, monkeypatch):
+def test_legacy_json_helpers_return_error_for_invalid_document_type(tmp_path, monkeypatch):
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "DATA_DIR", tmp_path)

@@ -1,8 +1,6 @@
 import json
-from ..capability.tool_registry import tool
 from app.core.paths import novel_path
 
-@tool(name="review_chapter", description="Load a chapter payload for review; review policy comes from skills")
 def review_chapter(chapter_id: str, novel_id: str = None) -> str:
     """读取章节内容，供 skill 驱动的审查流程使用"""
     import os

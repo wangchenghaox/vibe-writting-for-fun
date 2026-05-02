@@ -12,7 +12,6 @@ triggers:
   - 故事线
   - 世界观
 allowed_tools:
-  - get_novel
   - read_file
   - write_file
   - edit_file
@@ -32,7 +31,7 @@ priority: 20
 
 ## 上下文读取
 
-- 如用户提到已有小说，先用 `get_novel` 获取小说信息。
+- 如用户提到已有小说，优先使用会话中的 `novel_id` 定位 `novels/{novel_id}/` 下的 Markdown 文件。
 - 如用户要求续接或细化已有大纲，使用 `search_files` 或 `list_files` 查找 `novels/{novel_id}/outlines/*.md`，再用 `read_file` 读取。
 - 不确定要细化哪个大纲时，先询问用户，不要猜测覆盖。
 
