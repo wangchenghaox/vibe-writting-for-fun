@@ -1,6 +1,14 @@
 import json
 
 from app.capability.tool_registry import tool, execute_tool, get_tool_schemas
+import app.tools as _tools  # noqa: F401
+from app.tools.novel_tools import (
+    create_novel,
+    get_novel,
+    list_novel_documents,
+    load_novel_document,
+    save_novel_document,
+)
 from app.tools.review_tools import review_chapter
 
 
@@ -39,6 +47,87 @@ def test_tool_schema_filtering_by_allowed_names():
     schemas = get_tool_schemas(allowed_names=["allowed_schema_tool"])
 
     assert [schema["function"]["name"] for schema in schemas] == ["allowed_schema_tool"]
+
+
+def test_domain_tools_expose_slim_schema_set():
+    tool_names = {schema["function"]["name"] for schema in get_tool_schemas()}
+
+    assert {
+        "create_novel",
+        "get_novel",
+        "save_novel_document",
+        "load_novel_document",
+        "list_novel_documents",
+    }.issubset(tool_names)
+    assert {
+        "list_novels",
+        "get_novel_info",
+        "save_outline",
+        "load_outline",
+        "save_chapter",
+        "load_chapter",
+        "list_chapters",
+    }.isdisjoint(tool_names)
+
+
+def test_slim_domain_tools_manage_novels_and_documents(tmp_path, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DATA_DIR", tmp_path)
+
+    assert "Novel created" in create_novel("novel_slim", "瘦身测试", "描述")
+
+    novels = json.loads(get_novel())
+    assert novels == [{
+        "id": "novel_slim",
+        "title": "瘦身测试",
+        "description": "描述",
+        "created_at": novels[0]["created_at"],
+    }]
+
+    novel_info = json.loads(get_novel("novel_slim"))
+    assert novel_info["title"] == "瘦身测试"
+
+    assert "Document saved" in save_novel_document(
+        "outline",
+        "main",
+        "总大纲",
+        novel_id="novel_slim",
+    )
+    assert json.loads(load_novel_document("outline", "main", novel_id="novel_slim")) == {
+        "id": "main",
+        "content": "总大纲",
+    }
+
+    assert "Document saved" in save_novel_document(
+        "chapter",
+        "chapter_1",
+        "正文",
+        title="第一章",
+        novel_id="novel_slim",
+    )
+    assert json.loads(load_novel_document("chapter", "chapter_1", novel_id="novel_slim")) == {
+        "id": "chapter_1",
+        "title": "第一章",
+        "content": "正文",
+    }
+    assert json.loads(list_novel_documents("chapter", novel_id="novel_slim")) == ["chapter_1"]
+
+
+def test_slim_domain_tools_return_error_for_invalid_document_type(tmp_path, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DATA_DIR", tmp_path)
+
+    assert save_novel_document("note", "n1", "content", novel_id="novel_slim").startswith(
+        "Invalid document_type"
+    )
+    assert load_novel_document("note", "n1", novel_id="novel_slim").startswith(
+        "Invalid document_type"
+    )
+    assert list_novel_documents("note", novel_id="novel_slim").startswith(
+        "Invalid document_type"
+    )
 
 
 def test_review_chapter_returns_payload_without_embedded_review_policy(tmp_path, monkeypatch):
