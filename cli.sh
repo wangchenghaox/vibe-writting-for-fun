@@ -1,3 +1,3 @@
 #!/bin/bash
 cd "$(dirname "$0")/backend"
-uv run python app/cli_main.py
+uv run python -m app.cli_main

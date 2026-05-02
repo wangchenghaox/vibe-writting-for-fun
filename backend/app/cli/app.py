@@ -1,15 +1,16 @@
 import uuid
 import os
+import errno
 from ..agent.core import AgentCore
 from ..agent.session import Session
 from ..db.init import init_db
 from ..llm.config import create_provider
 from ..memory.event_recorder import MemoryEventRecorder
 from ..storage.session_store import SessionStore
-from ..ui.rich_display import RichDisplay
-from ..tools import chapter_tools, outline_tools, novel_tools, review_tools
+from .display import RichDisplay
+from .. import tools as _tools  # noqa: F401 - import registers tool decorators
 from ..utils.logging_config import setup_logging
-from ..ui.commands import CommandHandler
+from .commands import CommandHandler
 
 class CLI:
     def __init__(self):
@@ -63,9 +64,23 @@ class CLI:
         # 清理可能存在的旧订阅
         agent.event_bus._subscribers.clear()
 
-        agent.event_bus.subscribe(EventType.TOOL_CALLED, on_tool_called)
-        agent.event_bus.subscribe(EventType.TOOL_RESULT, on_tool_result)
-        agent.event_bus.subscribe(EventType.CONTEXT_COMPRESSED, on_context_compressed)
+        subscriptions = (
+            (EventType.TOOL_CALLED, on_tool_called),
+            (EventType.TOOL_RESULT, on_tool_result),
+            (EventType.CONTEXT_COMPRESSED, on_context_compressed),
+        )
+        for event_type, callback in subscriptions:
+            agent.event_bus.subscribe(event_type, callback)
+
+        def cleanup_subscriptions():
+            unsubscribe = getattr(agent.event_bus, "unsubscribe", None)
+            if unsubscribe is None:
+                return
+            for event_type, callback in subscriptions:
+                try:
+                    unsubscribe(event_type, callback)
+                except ValueError:
+                    pass
 
         while True:
             try:
@@ -77,6 +92,7 @@ class CLI:
                 if user_input.lower() in ['exit', 'quit']:
                     self.session_store.save_session(session)
                     self.display.console.print("[yellow]Session saved. Goodbye![/yellow]")
+                    cleanup_subscriptions()
                     break
 
                 # 处理命令
@@ -95,8 +111,16 @@ class CLI:
             except EOFError:
                 self.session_store.save_session(session)
                 self.display.console.print("\n[yellow]Session saved. Goodbye![/yellow]")
+                cleanup_subscriptions()
                 break
             except KeyboardInterrupt:
                 self.display.console.print("\n[yellow]已取消输入，按 Ctrl+D 或输入 exit 退出。[/yellow]")
+            except OSError as e:
+                if e.errno == errno.EINVAL:
+                    self.session_store.save_session(session)
+                    self.display.console.print("\n[yellow]检测到非交互式输入，Session saved. Goodbye![/yellow]")
+                    cleanup_subscriptions()
+                    break
+                self.display.console.print(f"[red]Error: {e}[/red]")
             except Exception as e:
                 self.display.console.print(f"[red]Error: {e}[/red]")

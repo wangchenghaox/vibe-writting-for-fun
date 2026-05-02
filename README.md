@@ -1,79 +1,83 @@
 # AI 小说生成器
 
-基于 AI Agent 的智能小说创作平台，支持 CLI 和 Web 两种使用方式。
+一个中文 AI 小说创作 CLI。核心形态是 Agent 对话、工具调用和小说文件落盘；Web 入口已移除，等 CLI 工作流成熟后再重构。
 
-## 功能特性
+## 功能
 
-- AI 对话式创作（支持工具调用）
-- 大纲/章节管理
-- 章节审查机制
-- 会话持久化
-- 多用户 Web 平台（JWT 认证）
-- 实时创作反馈（WebSocket）
-
-## 技术栈
-
-**后端：**
-- FastAPI - Web 框架
-- AI Agent Core - 对话引擎
-- 多 LLM 支持（Kimi/Claude/OpenAI）
-- SQLAlchemy + SQLite
-- WebSocket 实时通信
-
-**前端：**
-- Vue.js 3 + Vite
-- Element Plus
-- Pinia 状态管理
+- AI 对话式创作，支持工具调用
+- 小说、大纲、章节文件管理
+- 章节审查辅助
+- CLI 会话持久化
+- 多 LLM Provider：Kimi、Kimi Coding、OpenAI、Claude
+- SQLite 记录 Agent 事件和长期记忆
 
 ## 项目结构
 
-```
+```text
 vibe-writting-for-fun/
-├── backend/          # 统一后端
+├── backend/
 │   ├── app/
-│   │   ├── agent/    # Agent 核心
-│   │   ├── llm/      # LLM 提供者
-│   │   ├── tools/    # 工具集
-│   │   ├── api/      # Web API
-│   │   └── models/   # 数据模型
-│   ├── config/       # 配置文件
-│   ├── data/         # 数据存储
-│   └── tests/        # 单元测试
-├── frontend/         # Web 前端
-└── start.sh          # 一键启动
+│   │   ├── agent/      # Agent 核心
+│   │   ├── capability/ # 工具注册、技能、子 Agent、任务管理
+│   │   ├── cli/        # CLI 输入、输出、命令和运行编排
+│   │   ├── db/         # SQLite 初始化
+│   │   ├── events/     # 事件总线
+│   │   ├── llm/        # LLM Provider
+│   │   ├── memory/     # Agent 事件和记忆
+│   │   ├── models/     # 记忆相关 SQLAlchemy 模型
+│   │   ├── storage/    # 会话文件存储
+│   │   └── tools/      # Agent 工具
+│   ├── config/         # LLM 配置
+│   ├── data/           # 小说、会话、记忆数据库
+│   └── tests/
+├── docs/superpowers/   # 历史设计和实现计划
+├── cli.sh              # CLI 启动脚本
+└── .env.example
 ```
 
 ## 快速开始
 
-### Web 应用
-
-**一键启动：**
 ```bash
-./start.sh
+cd backend
+uv sync
+cp ../.env.example ../.env
 ```
 
-访问：
-- 前端：http://localhost:5173
-- 后端：http://localhost:8000
-- API 文档：http://localhost:8000/docs
-
-### 环境配置
-
-创建 `backend/.env` 文件：
-```bash
-KIMI_API_KEY=your_api_key_here
-JWT_SECRET_KEY=your_secret_key
-```
-
-### 运行测试
+配置 `.env` 中的 API key 后运行：
 
 ```bash
 cd backend
-uv run pytest tests/ -v
+uv run python -m app.cli_main
 ```
+
+也可以从仓库根目录运行：
+
+```bash
+./cli.sh
+```
+
+## 测试
+
+```bash
+cd backend
+uv run pytest
+uv run pytest tests/test_*.py
+uv run pytest --cov=app
+```
+
+## 数据
+
+小说内容默认写入：
+
+```text
+backend/data/novels/{novel_id}/
+  meta.json
+  outlines/{outline_id}.json
+  chapters/{chapter_id}.json
+```
+
+CLI 会话默认写入 `backend/data/sessions/`。Agent 事件和长期记忆默认使用 SQLite `backend/data/agent_memory.db`。
 
 ## License
 
 MIT
-
-

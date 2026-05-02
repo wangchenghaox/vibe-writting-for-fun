@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import json
 from rich.table import Table
-from .prompt_input import COMMANDS
+from .input import COMMANDS
 
 class CommandHandler:
     def __init__(self, console, agent=None):

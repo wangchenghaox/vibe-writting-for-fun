@@ -1,116 +1,83 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-Chinese web novel generation tool with AI Agent core system. Python backend with FastAPI for both CLI and Web interfaces. Supports multiple LLM providers (default: Kimi/Moonshot API).
+Chinese AI web-novel generation CLI with an Agent Core, tool calling, file-backed novel data, and SQLite-backed agent memory. The previous Web frontend, FastAPI API, WebSocket layer, and JWT authentication have been removed until the CLI workflow is mature enough for a future rebuild.
 
 ## Repository Structure
 
-- `backend/` - Consolidated Python application (CLI + Web API)
-- `frontend/` - Vue.js web interface
-- `docs/superpowers/specs/` - Design specifications
-- `.claude/` - Claude Code skills and OpenSpec workflow
+- `backend/` - Python application
+- `backend/app/cli/` - CLI runtime, slash commands, Rich display, prompt-toolkit input
+- `backend/app/agent/` - Agent orchestration, session, context compression
+- `backend/app/llm/` - Kimi, Kimi Coding, OpenAI, and Claude providers
+- `backend/app/tools/` - Agent tools
+- `backend/app/memory/` - Agent event and long-term memory services
+- `backend/data/` - local novel files, sessions, and SQLite memory database
+- `docs/superpowers/` - historical specs and implementation plans
 
 ## Development Commands
 
-### Backend Setup
-
 ```bash
 cd backend
-uv sync  # Install dependencies
-cp .env.example .env  # Configure API keys
+uv sync
+cp ../.env.example ../.env
 ```
 
-### Running Services
+Run the CLI:
 
 ```bash
-# CLI interface
 cd backend
 uv run python -m app.cli_main
-
-# Web API server
-cd backend
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Frontend dev server
-cd frontend
-npm run dev
 ```
 
-### Testing
+Or from the repository root:
+
+```bash
+./cli.sh
+```
+
+Run tests:
 
 ```bash
 cd backend
-uv run pytest                    # Run all tests
-uv run pytest tests/test_*.py    # Run specific test file
-uv run pytest --cov=app          # Run with coverage
+uv run pytest
+uv run pytest tests/test_*.py
+uv run pytest --cov=app
 ```
 
-## Architecture Overview
+## Architecture
 
-**Consolidated Backend** (`backend/app/`):
+1. **CLI** (`app/cli/`)
+   - `app.py`: runtime orchestration
+   - `commands.py`: slash command handling
+   - `display.py`: Rich console output
+   - `input.py`: prompt-toolkit history and completion
 
-1. **Agent Core** (`agent/`) - Conversation engine with context compression
-   - `AgentCore`: Main orchestrator, handles tool calls and LLM interaction
-   - `Session`: Message history management
-   - `ContextCompressor`: Auto-compresses when >70% of token limit (70k tokens)
+2. **Agent Core** (`app/agent/`)
+   - `AgentCore`: orchestrates messages, tool calls, and LLM responses
+   - `Session`: message history and context
+   - `ContextCompressor`: compresses history when the token estimate exceeds 70% of max tokens
 
-2. **LLM Providers** (`llm/`) - Multi-provider support via adapter pattern
-   - `KimiProvider`: Default, uses OpenAI SDK with 120s timeout
-   - `AnthropicProvider`: Direct Anthropic API integration
-   - Config: `config/llm.yaml` defines available providers
+3. **LLM Providers** (`app/llm/`)
+   - OpenAI-compatible provider for Kimi/OpenAI
+   - Anthropic provider for Claude and Kimi Coding
+   - Provider config lives in `backend/config/llm.yaml`
 
-3. **Capabilities** (`capability/`) - Core agent features
-   - `ToolRegistry`: Decorator-based tool registration (`@tool(name, desc)`)
-   - `SkillLoader`: Dynamic skill loading from markdown files
-   - `SubAgentManager`: Manages child agent instances
-   - `TaskManager`: Task tracking and status management
+4. **Tools** (`app/tools/`)
+   - Novel, outline, chapter, review, file, memory, and web-search tools
+   - Import new tool modules from `app/tools/__init__.py` so decorators register schemas
 
-4. **Tools** (`tools/`) - Concrete implementations
-   - Novel tools: `save_outline`, `save_chapter`, `load_chapter`
-   - Search tools: `web_search` (DuckDuckGo API, no key required)
+5. **Memory** (`app/memory/`, `app/models/novel.py`)
+   - `AgentEventLog` and `AgentMemory` are SQLAlchemy models
+   - Default SQLite URL is `sqlite:///./data/agent_memory.db`
 
-5. **Events** (`events/`) - Event-driven architecture
-   - `EventBus`: Singleton pub/sub for real-time updates
-   - Events: `TOOL_CALLED`, `TOOL_RESULT`, `CONTEXT_COMPRESSED`
+## Notes
 
-6. **API** (`api/`) - FastAPI REST + WebSocket endpoints
-   - Auth: JWT with bcrypt password hashing
-   - WebSocket: Real-time agent communication at `/ws/{novel_id}`
-   - Database: SQLAlchemy with SQLite
-
-## Key Design Patterns
-
-- **Tool Registration**: Use `@tool("name", "description")` decorator. Tools auto-register and generate OpenAI function schemas
-- **Event-Driven UI**: CLI subscribes to `EventBus` for real-time tool call display
-- **Context Compression**: Triggered at 70k tokens, keeps system messages + last 10 messages, summarizes middle
-- **Session Persistence**: Auto-saves to `backend/data/sessions/`
-- **Database Testing**: Use `StaticPool` for SQLite in-memory tests to share state across connections
-
-## Critical Implementation Details
-
-**Adding New Tools:**
-```python
-from app.capability.tool_registry import tool
-
-@tool("tool_name", "Description for LLM")
-def my_tool(param: str) -> str:
-    return result
-```
-Then import in `app/tools/__init__.py`
-
-**CLI Context Loading:**
-When `/load <novel_id>` is called, the command handler adds novel metadata, outline, and chapter list as a system message to the agent's session. This ensures the agent has full context.
-
-**LLM Timeout Handling:**
-Kimi provider configured with 120s timeout and 2 retries. If 504/429 errors persist, context compression will trigger automatically on next request.
-
-## Important Notes
-
-- All user-facing content is in Chinese
-- Novel data stored in `backend/data/novels/{novel_id}/`
-- Test database uses `StaticPool` to prevent "no such table" errors
-- EventBus is a singleton - clear subscribers when creating new agent instances
-- Tool calls may have missing IDs from Kimi API - fallback IDs are generated automatically
+- User-facing CLI text should be Chinese.
+- Novel data lives in `backend/data/novels/{novel_id}/`.
+- CLI sessions live in `backend/data/sessions/`.
+- Prefer `app.core.paths` for novel data paths.
+- EventBus is a singleton; CLI clears old subscribers when creating an Agent.
+- `httpx` is still needed by `web_search`; do not remove it as a Web-only dependency.

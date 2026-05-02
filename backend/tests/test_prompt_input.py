@@ -3,7 +3,7 @@ import json
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 
-from app.ui.prompt_input import NovelCommandCompleter
+from app.cli.input import NovelCommandCompleter
 
 
 def collect_completion_texts(completer, text):

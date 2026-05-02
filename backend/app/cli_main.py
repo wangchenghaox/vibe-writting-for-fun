@@ -1,6 +1,11 @@
-from app.ui.cli import CLI
+import argparse
 
-def main():
+from app.cli.app import CLI
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="AI 小说创作 CLI")
+    parser.parse_args(argv)
+
     cli = CLI()
     cli.run()
 

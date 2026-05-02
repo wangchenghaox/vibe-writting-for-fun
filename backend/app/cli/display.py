@@ -3,7 +3,7 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from ..events.event_bus import EventBus
 from ..events.event_types import Event, EventType
-from .prompt_input import PromptInput
+from .input import PromptInput
 
 class RichDisplay:
     def __init__(self, input_reader=None):
