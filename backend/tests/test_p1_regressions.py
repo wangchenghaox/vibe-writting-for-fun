@@ -18,18 +18,18 @@ from app.models.novel import Novel
 from app.models.user import User
 
 
-def test_web_agent_import_registers_all_novel_tools():
+def test_web_agent_import_exposes_file_memory_and_search_tools_without_json_domain_tools():
     import app.services.web_agent  # noqa: F401
 
     tool_names = {schema["function"]["name"] for schema in get_tool_schemas()}
 
     assert {
-        "create_novel",
-        "get_novel",
-        "save_novel_document",
-        "load_novel_document",
-        "list_novel_documents",
-        "review_chapter",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_files",
+        "search_files",
+        "grep_files",
         "web_search",
         "remember_memory",
         "search_memory",
@@ -44,6 +44,12 @@ def test_web_agent_import_registers_all_novel_tools():
         "list_chapters",
         "save_outline",
         "load_outline",
+        "create_novel",
+        "get_novel",
+        "save_novel_document",
+        "load_novel_document",
+        "list_novel_documents",
+        "review_chapter",
     }.isdisjoint(tool_names)
 
 

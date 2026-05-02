@@ -2,7 +2,6 @@ import os
 import json
 from datetime import datetime
 from pathlib import Path
-from ..capability.tool_registry import tool
 from app.core.paths import novel_path, novels_path
 
 
@@ -48,7 +47,6 @@ def _document_payload(
         return {"id": document_id, "title": title, "content": content}
     return {"id": document_id, "content": content}
 
-@tool(name="create_novel", description="Create a new novel project")
 def create_novel(novel_id: str, title: str, description: str = "") -> str:
     base_path = novel_path(novel_id)
     os.makedirs(base_path / "chapters", exist_ok=True)
@@ -67,18 +65,12 @@ def create_novel(novel_id: str, title: str, description: str = "") -> str:
     return f"Novel created: {base_path}. Current novel_id set to: {novel_id}"
 
 
-@tool(name="get_novel", description="List all novel projects, or get one novel by novel_id")
 def get_novel(novel_id: str = "") -> str:
     if novel_id:
         return get_novel_info(novel_id)
     return list_novels()
 
 
-@tool(
-    name="save_novel_document",
-    description="Save an outline or chapter document for the current novel; content is required and must contain the full text to save",
-    context_params=["novel_id"],
-)
 def save_novel_document(
     document_type: str,
     document_id: str,
@@ -103,11 +95,6 @@ def save_novel_document(
     return f"Document saved: {path}"
 
 
-@tool(
-    name="load_novel_document",
-    description="Load an outline or chapter document for the current novel",
-    context_params=["novel_id"],
-)
 def load_novel_document(
     document_type: str,
     document_id: str,
@@ -125,11 +112,6 @@ def load_novel_document(
     return json.dumps(data, ensure_ascii=False)
 
 
-@tool(
-    name="list_novel_documents",
-    description="List saved outline or chapter document ids for the current novel",
-    context_params=["novel_id"],
-)
 def list_novel_documents(document_type: str, novel_id: str = None) -> str:
     novel_id = novel_id or _current_novel_id()
     try:

@@ -163,10 +163,10 @@ def test_requirement_confirmer_uses_safe_tools_and_option_guidance():
 
     assert skill.priority > SkillLoader().discover_skills()["content-reviewer"].priority
     assert "save_novel_document" not in skill.allowed_tools
+    assert "get_novel" not in skill.allowed_tools
     assert "write_file" not in skill.allowed_tools
     assert "edit_file" not in skill.allowed_tools
     assert set(skill.allowed_tools) == {
-        "get_novel",
         "read_file",
         "list_files",
         "search_files",
@@ -244,6 +244,7 @@ def test_creation_skills_write_markdown_with_basic_file_tools():
         skill = skills[skill_name]
         assert "write_file" in skill.allowed_tools
         assert "edit_file" in skill.allowed_tools
+        assert "get_novel" not in skill.allowed_tools
         assert "save_novel_document" not in skill.allowed_tools
         assert "load_novel_document" not in skill.allowed_tools
         assert "Markdown" in skill.content
