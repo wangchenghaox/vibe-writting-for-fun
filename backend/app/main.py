@@ -3,14 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.config import settings
-from app.db.base import engine, Base
-from app.models import user, novel
+from app.db.init import init_db
 from app.api import auth, novels, websocket, reviews
 from app.core.exceptions import http_exception_handler, validation_exception_handler
 import os
 
 os.makedirs("data", exist_ok=True)
-Base.metadata.create_all(bind=engine)
+init_db()
 
 app = FastAPI(title="AI Novel Generator API")
 

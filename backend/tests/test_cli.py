@@ -82,3 +82,23 @@ def test_cli_streams_assistant_response(monkeypatch):
         "你",
         "好",
     ]
+
+
+def test_cli_initializes_database_schema(monkeypatch):
+    import app.ui.cli as cli_module
+
+    init_calls = []
+
+    monkeypatch.setattr(cli_module, "init_db", lambda: init_calls.append(True))
+    monkeypatch.setattr(cli_module, "setup_logging", lambda: None)
+    monkeypatch.setattr(cli_module, "create_provider", lambda: object())
+    monkeypatch.setattr(cli_module, "RichDisplay", lambda: FakeDisplay())
+    monkeypatch.setattr(
+        cli_module,
+        "SessionStore",
+        lambda: type("FakeSessionStore", (), {"save_session": lambda self, session: None})(),
+    )
+
+    cli_module.CLI()
+
+    assert init_calls == [True]

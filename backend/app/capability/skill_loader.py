@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 import logging
+import re
 
 import yaml
 
@@ -23,7 +24,17 @@ class SkillDefinition:
 
     def matches(self, message: str) -> bool:
         text = message.lower()
-        return any(trigger.lower() in text for trigger in self.triggers if trigger)
+        return any(self._matches_trigger(text, trigger) for trigger in self.triggers if trigger)
+
+    def _matches_trigger(self, text: str, trigger: str) -> bool:
+        if trigger.startswith("re:"):
+            try:
+                return re.search(trigger[3:], text, flags=re.IGNORECASE) is not None
+            except re.error:
+                logger.warning("Invalid skill trigger regex for %s: %s", self.name, trigger)
+                return False
+
+        return trigger.lower() in text
 
 
 class SkillLoader:
