@@ -1,5 +1,7 @@
 llm:
   default: ${LLM_PROVIDER:-kimi}
+  timeout: ${LLM_TIMEOUT:-120}
+  max_retries: ${LLM_MAX_RETRIES:-2}
   providers:
     kimi:
       type: kimi

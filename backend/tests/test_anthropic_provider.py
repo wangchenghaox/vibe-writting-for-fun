@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import anthropic
+import httpx
+
 from app.llm.anthropic_provider import AnthropicProvider
 
 
@@ -54,3 +57,79 @@ def test_anthropic_prepare_messages_combines_system_messages():
 
     assert system_msg == "基础规则\n\n技能规则"
     assert chat_messages == [{"role": "user", "content": "hello"}]
+
+
+def test_anthropic_convert_tool_enables_strict_schema_validation():
+    provider = AnthropicProvider(api_key="test", model="test-model", base_url="https://example.test")
+
+    converted = provider._convert_tool({
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+        },
+    })
+
+    assert converted == {
+        "name": "write_file",
+        "description": "Write file",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def test_anthropic_chat_retries_without_strict_when_provider_rejects_it():
+    provider = AnthropicProvider(api_key="test", model="test-model", base_url="https://example.test")
+    request = httpx.Request("POST", "https://example.test/v1/messages")
+    strict_error = anthropic.BadRequestError(
+        "unexpected field: strict",
+        response=httpx.Response(400, request=request),
+        body={"error": {"message": "unexpected field: strict"}},
+    )
+
+    class FakeMessages:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise strict_error
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="ok")],
+                stop_reason="end_turn",
+            )
+
+    fake_messages = FakeMessages()
+    provider.client = SimpleNamespace(messages=fake_messages)
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write file",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    }]
+
+    response = provider.chat([{"role": "user", "content": "hi"}], tools)
+
+    assert response.content == "ok"
+    assert fake_messages.calls[0]["tools"][0]["strict"] is True
+    assert "strict" not in fake_messages.calls[1]["tools"][0]

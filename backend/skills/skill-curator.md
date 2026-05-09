@@ -2,15 +2,9 @@
 name: skill-curator
 description: 根据多轮对话总结用户习惯、偏好和 SOP，并优化已有 skill 或创建新 skill
 triggers:
-  - 优化 skill
-  - 更新 skill
-  - 新建 skill
-  - 总结我的习惯
-  - 用户习惯
-  - 沉淀 SOP
-  - 固定 SOP
-  - 工作流沉淀
-  - 细化 skill
+  - 用户要求优化、更新、新建或细化 skill，让某类创作流程以后更稳定复用时。
+  - 用户要求总结自己的习惯、偏好、固定 SOP 或多轮对话中反复出现的工作方式时。
+  - 用户希望把一次成功的创作流程沉淀成可复用 Markdown skill 文件时。
 allowed_tools:
   - read_file
   - write_file

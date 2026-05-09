@@ -3,9 +3,8 @@ Skill加载器 - 动态加载和管理技能
 """
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional
 import logging
-import re
 
 import yaml
 
@@ -21,20 +20,6 @@ class SkillDefinition:
     priority: int = 0
     content: str = ""
     path: Optional[Path] = None
-
-    def matches(self, message: str) -> bool:
-        text = message.lower()
-        return any(self._matches_trigger(text, trigger) for trigger in self.triggers if trigger)
-
-    def _matches_trigger(self, text: str, trigger: str) -> bool:
-        if trigger.startswith("re:"):
-            try:
-                return re.search(trigger[3:], text, flags=re.IGNORECASE) is not None
-            except re.error:
-                logger.warning("Invalid skill trigger regex for %s: %s", self.name, trigger)
-                return False
-
-        return trigger.lower() in text
 
 
 class SkillLoader:
@@ -91,41 +76,22 @@ class SkillLoader:
     def get_skill(self, skill_name: str) -> Optional[SkillDefinition]:
         return self.discover_skills().get(skill_name)
 
-    def select_skills(
-        self,
-        message: str,
-        requested: Optional[str | Sequence[str]] = None,
-    ) -> List[SkillDefinition]:
-        """按显式请求和触发词选择技能"""
-        skills = self.discover_skills()
-        selected: List[SkillDefinition] = []
-
-        requested_names: List[str] = []
-        if isinstance(requested, str):
-            requested_names = [requested]
-        elif requested:
-            requested_names = list(requested)
-
-        for name in requested_names:
-            skill = skills.get(name)
-            if skill and skill not in selected:
-                selected.append(skill)
-
-        matches = [skill for skill in skills.values() if skill.matches(message)]
-        matches.sort(key=lambda skill: skill.priority, reverse=True)
-        for skill in matches:
-            if skill not in selected:
-                selected.append(skill)
-
-        return selected
-
-    def build_prompt(self, skills: Sequence[SkillDefinition]) -> str:
+    def build_catalog_prompt(self) -> str:
+        skills = sorted(
+            self.discover_skills().values(),
+            key=lambda skill: (-skill.priority, skill.name),
+        )
         if not skills:
             return ""
 
-        sections = ["你正在使用以下创作技能。请遵循技能流程和质量标准完成用户请求。"]
+        sections = [
+            (
+                "你可以使用以下本地创作技能。请根据用户请求和触发时机判断是否需要启用；"
+                "完整说明见对应的 skill 说明文件路径。"
+            )
+        ]
         for skill in skills:
-            sections.append(self._format_skill_prompt(skill))
+            sections.append(self._format_catalog_entry(skill))
         return "\n\n".join(sections)
 
     def _parse_skill_file(self, skill_path: Path) -> SkillDefinition:
@@ -149,14 +115,26 @@ class SkillLoader:
             path=skill_path,
         )
 
-    def _format_skill_prompt(self, skill: SkillDefinition) -> str:
-        allowed_tools = ", ".join(skill.allowed_tools) if skill.allowed_tools else "不限制"
+    def _format_catalog_entry(self, skill: SkillDefinition) -> str:
+        trigger_lines = skill.triggers or ["未设置显式触发词"]
+        triggers = "\n".join(f"- {trigger}" for trigger in trigger_lines)
         return (
-            f"已启用技能: {skill.name}\n"
-            f"技能说明: {skill.description}\n"
-            f"允许工具: {allowed_tools}\n\n"
-            f"{skill.content}"
+            f"技能: {skill.name}\n"
+            f"说明: {skill.description or '无'}\n"
+            f"触发时机:\n{triggers}\n"
+            f"说明文件: {self._catalog_skill_path(skill)}"
         )
+
+    def _catalog_skill_path(self, skill: SkillDefinition) -> str:
+        if skill.path is None:
+            return f"skills/{skill.name}.md"
+
+        try:
+            relative_path = skill.path.relative_to(self.skills_dir)
+        except ValueError:
+            relative_path = Path(skill.path.name)
+
+        return str(Path("skills") / relative_path).replace("\\", "/")
 
     def _as_list(self, value) -> List[str]:
         if value is None:

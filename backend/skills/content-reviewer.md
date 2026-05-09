@@ -2,13 +2,9 @@
 name: content-reviewer
 description: 审查章节质量并给出可执行修改建议
 triggers:
-  - 审查
-  - 审稿
-  - 审读
-  - review
-  - 找问题
-  - 修改建议
-  - 润色建议
+  - 用户要求审查、审稿、审读、review、找问题、提出修改建议或润色建议时。
+  - 用户希望检查章节的情节连贯、人物动机、节奏、文风、伏笔或逻辑漏洞时。
+  - 用户提供或指定章节正文，需要输出分级问题清单和可执行修改建议时。
 allowed_tools:
   - read_file
   - write_file
@@ -29,7 +25,8 @@ priority: 30
 
 ## 上下文读取
 
-- 如果用户只给章节编号，先使用 `search_files` 或 `list_files` 查找 `novels/{novel_id}/chapters/{chapter_id}.md`，再用 `read_file` 读取章节。
+- 文件路径使用当前 sandbox 相对路径，不要加 `novels/` 前缀。
+- 如果用户只给章节编号，先使用 `search_files` 或 `list_files` 查找 `{novel_slug}/chapters/{chapter_id}.md`，再用 `read_file` 读取章节。
 - 如需对照前后文，使用 `list_files` 和 `read_file` 读取相邻章节 Markdown。
 - 不要在未读取章节内容时假装已经审查。
 
@@ -46,8 +43,8 @@ priority: 30
 ## 保存规则
 
 - 保存审稿意见时只使用 `write_file` 或 `edit_file`，不要使用领域保存工具。
-- 审稿意见默认写入 `novels/{novel_id}/reviews/{chapter_id}_review.md`。
-- 保存改写章节时写入 `novels/{novel_id}/chapters/{chapter_id}.md`，覆盖前必须确认。
+- 审稿意见默认写入 `{novel_slug}/reviews/{chapter_id}_review.md`，这是当前 sandbox 相对路径，不要加 `novels/` 前缀。
+- 保存改写章节时写入 `{novel_slug}/chapters/{chapter_id}.md`，覆盖前必须确认。
 - 文件类型必须是 Markdown，扩展名必须是 `.md`。
 - 文件内容使用固定格式，不依赖工具的 JSON 或参数格式限制。
 - `content` 必须是完整 Markdown 文件内容；审稿意见和改写正文不要混写到错误文件。

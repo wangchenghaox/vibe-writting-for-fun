@@ -3,12 +3,18 @@ from typing import Callable, Dict, Any, List, Optional, Sequence
 
 _tool_registry: Dict[str, Dict[str, Any]] = {}
 
-def tool(name: str, description: str, context_params: Optional[Sequence[str]] = None):
+def tool(
+    name: str,
+    description: str,
+    context_params: Optional[Sequence[str]] = None,
+    parameter_descriptions: Optional[Dict[str, str]] = None,
+):
     def decorator(func: Callable):
         sig = inspect.signature(func)
         params = {}
         required = []
         hidden_context_params = set(context_params or [])
+        param_descriptions = parameter_descriptions or {}
 
         for param_name, param in sig.parameters.items():
             if param_name in hidden_context_params:
@@ -23,7 +29,7 @@ def tool(name: str, description: str, context_params: Optional[Sequence[str]] = 
 
             params[param_name] = {
                 "type": param_type,
-                "description": f"Parameter {param_name}"
+                "description": param_descriptions.get(param_name, f"Parameter {param_name}")
             }
             if param.default == inspect.Parameter.empty:
                 required.append(param_name)
@@ -36,7 +42,8 @@ def tool(name: str, description: str, context_params: Optional[Sequence[str]] = 
                 "parameters": {
                     "type": "object",
                     "properties": params,
-                    "required": required
+                    "required": required,
+                    "additionalProperties": False,
                 }
             }
         }
@@ -75,6 +82,14 @@ def _missing_required_arguments(entry: Dict[str, Any], call_args: Dict[str, Any]
     return missing
 
 
+def _unexpected_arguments(entry: Dict[str, Any], call_args: Dict[str, Any]) -> List[str]:
+    parameters = entry["signature"].parameters
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+        return []
+
+    return [name for name in call_args if name not in parameters]
+
+
 def execute_tool(name: str, arguments: Dict[str, Any], context: Dict[str, Any] = None) -> Any:
     if name not in _tool_registry:
         raise ValueError(f"Tool {name} not found")
@@ -97,5 +112,9 @@ def execute_tool(name: str, arguments: Dict[str, Any], context: Dict[str, Any] =
     missing = _missing_required_arguments(entry, call_args)
     if missing:
         return f"Tool {name} missing required argument(s): {', '.join(missing)}"
+
+    unexpected = _unexpected_arguments(entry, call_args)
+    if unexpected:
+        return f"Tool {name} got unexpected argument(s): {', '.join(unexpected)}"
 
     return entry["func"](**call_args)

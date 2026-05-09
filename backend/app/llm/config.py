@@ -38,6 +38,8 @@ def create_provider(config_path: str = "config/llm.yaml") -> LLMProvider:
 
     provider_config = providers[default]
     provider_type = provider_config.get('type', default)
+    timeout = float(provider_config.get('timeout', config['llm'].get('timeout', 120.0)))
+    max_retries = int(provider_config.get('max_retries', config['llm'].get('max_retries', 2)))
 
     api_key = provider_config['api_key']
     if not api_key:
@@ -53,15 +55,25 @@ def create_provider(config_path: str = "config/llm.yaml") -> LLMProvider:
         return KimiProvider(
             api_key=api_key,
             model=model,
-            base_url=base_url
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=max_retries,
         )
     if provider_type in ('openai', 'openai_compatible'):
-        return OpenAICompatibleProvider(api_key=api_key, model=model, base_url=base_url)
+        return OpenAICompatibleProvider(
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=max_retries,
+        )
     if provider_type in ('anthropic', 'claude', 'kimi_coding'):
         return AnthropicProvider(
             api_key=api_key,
             model=model,
-            base_url=base_url
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=max_retries,
         )
 
     raise ValueError(f"Unknown provider type: {provider_type}")

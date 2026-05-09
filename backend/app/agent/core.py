@@ -6,7 +6,7 @@ from ..llm.provider import LLMProvider, Response
 from ..agent.session import Session
 from ..agent.context_compressor import ContextCompressor
 from ..capability.tool_registry import get_tool_schemas, execute_tool
-from ..capability.skill_loader import SkillDefinition, SkillLoader
+from ..capability.skill_loader import SkillLoader
 from ..capability.subagent_manager import SubAgentManager
 from ..capability.task_manager import TaskManager
 from ..events.event_bus import EventBus
@@ -21,6 +21,57 @@ MEMORY_TOOL_NAMES = {
     "archive_memory",
 }
 MEMORY_CONTEXT_KEYS = ("user_id", "novel_id", "agent_name")
+FILE_MUTATION_TOOL_NAMES = {
+    "write_file",
+    "edit_file",
+    "delete_file",
+    "rename_file",
+}
+BASE_SYSTEM_PROMPT = """你是一个中文长篇小说创作 CLI Agent，运行在本地小说工作区中。你的核心职责是和用户一起完成小说创作、规划、审稿、资料整理和文件落盘工作。
+
+你擅长：
+- 和用户澄清创作目标、题材、风格、范围和保存意图。
+- 生成、细化和整理小说大纲、章节细纲、世界观、剧情线。
+- 设计人物设定、角色关系、成长弧和冲突结构。
+- 创作、续写、改写章节正文，并保持上下文、人物动机和文风连贯。
+- 审查章节质量，指出情节、人物、节奏、逻辑和文风问题，并给出可执行修改建议。
+- 将确认后的内容保存为 Markdown 文件，并在保存前确保内容完整、路径明确。
+
+工作原则：
+- 默认使用中文回复，除非用户明确要求其他语言。
+- 先理解用户真实意图；当方向、范围、风格、目标文件或覆盖意图不明确时，先简短确认，不要直接进入高成本创作或保存。
+- 不要假装已经读取文件。需要基于已有大纲、章节、角色或审稿文件工作时，先使用工具读取相关文件。
+- 不要凭空覆盖已有文件。涉及保存、覆盖、重写时，必须确认目标路径和内容来源。
+- 生成正文、大纲、人设或审稿意见时，优先给出可直接使用的内容，避免空泛解释。
+- 文件内容应优先使用 Markdown；写入文件时必须提供完整正文，不要只写摘要、说明或占位内容。
+- 如果工具调用失败，清楚说明失败原因，并给出下一步可行方案。
+
+技能使用：
+- 系统会提供可用 skill 的名称、说明、触发时机和说明文件路径。
+- 当用户请求符合某个 skill 的触发时机时，你应主动参考该 skill；如果需要完整流程、格式或安全规则，可以读取对应的 skills/*.md 说明文件。
+- 不要只因为关键词相似就机械套用 skill；应根据用户的真实任务判断是否需要使用。
+- 多个 skill 都相关时，先选择最能降低返工风险的流程。例如高影响创作且需求不清时，先确认需求，再进入章节、大纲、人设或审稿流程。
+
+交互风格：
+- 回复要清楚、直接、有创作协作感。
+- 用户只是要结果时，少讲过程；用户在探索时，可以给出 1-3 个方向供选择。
+- 面对复杂任务，先给简洁计划，再分步执行。
+- 面对不确定信息，明确说出不确定点，不要编造。"""
+WRITE_FILE_USAGE_PROMPT = (
+    "工具调用规则：调用 write_file 必须同时提供 path 和完整 content；content 是要写入文件的完整正文。"
+    "没有完整正文时不要调用 write_file，先生成完整正文、询问用户，或说明缺少可保存内容。"
+)
+MAIN_AGENT_ROLE_PROMPT = (
+    "运行时角色：你是主 Agent。你的职责是直接和用户交流、澄清需求、整理约束、制定执行计划，"
+    "然后通过 create_sub_agent 把具体执行任务交给子 Agent。你不能直接写入、编辑、删除或重命名文件；"
+    "需要改动文件时，先整理清楚任务、目标路径和验收标准，再委派子 Agent 执行。"
+)
+SUB_AGENT_ROLE_PROMPT = (
+    "运行时角色：你是子 Agent。你只负责执行主 Agent 分配的具体任务，不能直接与用户对话，"
+    "不能向用户提问或等待用户输入；如果信息不足，把缺口和建议下一步写入执行结果交回主 Agent。"
+    "你不能创建新的子 Agent。"
+)
+MIN_BACKFILL_DRAFT_CHARS = 20
 
 
 @dataclass
@@ -39,6 +90,8 @@ class AgentCore:
         memory_recorder=None,
         memory_enabled: bool = False,
         max_tool_rounds: int = 8,
+        blocked_tool_names: Optional[set[str]] = None,
+        can_create_sub_agent: bool = True,
     ):
         self.provider = provider
         self.session = session
@@ -46,9 +99,12 @@ class AgentCore:
         self.memory_recorder = memory_recorder
         self.memory_enabled = memory_enabled
         self.max_tool_rounds = max_tool_rounds
+        self.blocked_tool_names = set(blocked_tool_names or [])
+        self.can_create_sub_agent = can_create_sub_agent
         self.event_bus = EventBus()
         self.context_compressor = ContextCompressor()
         self.skill_loader = skill_loader or SkillLoader()
+        self.skill_catalog_prompt = self.skill_loader.build_catalog_prompt()
         self.subagent_manager = SubAgentManager()
         self.task_manager = TaskManager()
 
@@ -77,26 +133,45 @@ class AgentCore:
 
         return messages
 
-    def _select_skills(self, user_message: str):
-        requested = (
-            self.session.context.get("active_skills")
-            or self.session.context.get("active_skill")
-        )
-        return self.skill_loader.select_skills(user_message, requested=requested)
+    def _get_tools(self):
+        tools = get_tool_schemas()
+        if not self.memory_enabled or not self._has_memory_context():
+            tools = [
+                schema for schema in tools
+                if schema["function"]["name"] not in MEMORY_TOOL_NAMES
+            ]
 
-    def _get_tools_for_skills(self, skills: list[SkillDefinition]):
-        allowed_tools = []
-        for skill in skills:
-            allowed_tools.extend(skill.allowed_tools)
+        blocked_tool_names = self._blocked_tool_names()
+        if blocked_tool_names:
+            tools = [
+                schema for schema in tools
+                if schema["function"]["name"] not in blocked_tool_names
+            ]
 
-        tools = get_tool_schemas(allowed_names=allowed_tools or None)
-        if self.memory_enabled and self._has_memory_context():
-            return tools
+        return tools
 
-        return [
-            schema for schema in tools
-            if schema["function"]["name"] not in MEMORY_TOOL_NAMES
-        ]
+    def _blocked_tool_names(self):
+        blocked = set(self.blocked_tool_names)
+        if self.tool_context.get("agent_name") == "main":
+            blocked.update(FILE_MUTATION_TOOL_NAMES)
+        if not self.can_create_sub_agent:
+            blocked.add("create_sub_agent")
+        return blocked
+
+    def _is_tool_blocked(self, tool_name: str) -> bool:
+        return tool_name in self._blocked_tool_names()
+
+    def _tool_execution_context(self):
+        context = dict(self.tool_context)
+        context.update({
+            "provider": self.provider,
+            "subagent_manager": self.subagent_manager,
+            "parent_session": self.session,
+            "tool_context": dict(self.tool_context),
+            "memory_enabled": self.memory_enabled,
+            "can_create_sub_agent": self.can_create_sub_agent,
+        })
+        return context
 
     def _has_memory_context(self):
         return all(
@@ -104,9 +179,64 @@ class AgentCore:
             for key in MEMORY_CONTEXT_KEYS
         )
 
-    def _inject_skill_prompt(self, messages: list[dict], skills: list[SkillDefinition]):
-        prompt = self.skill_loader.build_prompt(skills)
+    def _inject_base_system_prompt(self, messages: list[dict]):
+        if any(
+            msg.get("role") == "system"
+            and msg.get("content") == BASE_SYSTEM_PROMPT
+            for msg in messages
+        ):
+            return messages
+
+        prepared = list(messages)
+        insert_at = 0
+        while insert_at < len(prepared) and prepared[insert_at].get("role") == "system":
+            insert_at += 1
+        prepared.insert(insert_at, {"role": "system", "content": BASE_SYSTEM_PROMPT})
+        return prepared
+
+    def _inject_skill_catalog_prompt(self, messages: list[dict]):
+        if not self.skill_catalog_prompt:
+            return messages
+        if any(
+            msg.get("role") == "system"
+            and msg.get("content") == self.skill_catalog_prompt
+            for msg in messages
+        ):
+            return messages
+
+        prepared = list(messages)
+        insert_at = 0
+        while insert_at < len(prepared) and prepared[insert_at].get("role") == "system":
+            insert_at += 1
+        prepared.insert(insert_at, {"role": "system", "content": self.skill_catalog_prompt})
+        return prepared
+
+    def _inject_tool_usage_prompt(self, messages: list[dict], tools: list[dict]):
+        tool_names = {schema["function"]["name"] for schema in tools}
+        if "write_file" not in tool_names:
+            return messages
+        if any(msg.get("role") == "system" and msg.get("content") == WRITE_FILE_USAGE_PROMPT for msg in messages):
+            return messages
+
+        prepared = list(messages)
+        insert_at = 0
+        while insert_at < len(prepared) and prepared[insert_at].get("role") == "system":
+            insert_at += 1
+        prepared.insert(insert_at, {"role": "system", "content": WRITE_FILE_USAGE_PROMPT})
+        return prepared
+
+    def _role_prompt(self) -> Optional[str]:
+        if not self.can_create_sub_agent:
+            return SUB_AGENT_ROLE_PROMPT
+        if self.tool_context.get("agent_name") == "main":
+            return MAIN_AGENT_ROLE_PROMPT
+        return None
+
+    def _inject_role_prompt(self, messages: list[dict]):
+        prompt = self._role_prompt()
         if not prompt:
+            return messages
+        if any(msg.get("role") == "system" and msg.get("content") == prompt for msg in messages):
             return messages
 
         prepared = list(messages)
@@ -134,10 +264,67 @@ class AgentCore:
             "请先提供完整内容，或让我先生成完整正文后再保存。"
         )
 
+    def _write_file_missing_content_recovery_message(self, tool_args: dict) -> str:
+        path = tool_args.get("path") or "目标文件"
+        return (
+            f"无法保存到 {path}：缺少要写入的完整内容。"
+            "请先让我生成完整正文，或直接提供要保存的内容，然后我再写入文件。"
+        )
+
+    def _is_write_file_content_missing(self, tool_args: dict) -> bool:
+        return tool_args.get("content") in (None, "")
+
+    def _looks_like_draft_content(self, content: str) -> bool:
+        stripped = content.strip()
+        if len(stripped) < MIN_BACKFILL_DRAFT_CHARS:
+            return False
+        return "\n" in stripped
+
+    def _find_recent_assistant_draft_content(self) -> Optional[str]:
+        for msg in reversed(self.session.messages):
+            if msg.get("role") != "assistant":
+                continue
+            if msg.get("tool_calls"):
+                continue
+
+            content = msg.get("content") or ""
+            if self._looks_like_draft_content(content):
+                return content
+
+        return None
+
+    def _replace_stored_tool_call_arguments(self, index: int, tool_args: dict):
+        if not self.session.messages:
+            return
+
+        tool_calls = self.session.messages[-1].get("tool_calls") or []
+        if index >= len(tool_calls):
+            return
+
+        tool_calls[index]["function"]["arguments"] = json.dumps(tool_args, ensure_ascii=False)
+
+    def _handle_write_file_missing_content(self, tool_args: dict, tool_call_id: str):
+        result_text = "Tool write_file missing required argument(s): content"
+        self.session.add_message("tool", result_text, tool_call_id=tool_call_id, name="write_file")
+        recovery_message = self._write_file_missing_content_recovery_message(tool_args)
+        self._finish_assistant_message(recovery_message)
+        return ToolHandlingOutcome(self.session.get_messages(), recovery_message=recovery_message)
+
     def _finish_assistant_message(self, content: str):
         self.session.add_message("assistant", content)
         self.event_bus.publish(Event(EventType.MESSAGE_SENT, {"content": content}, self.session.id))
         self._record_memory_event("assistant_message", {"content": content})
+
+    def _stream_interrupted_message(self, exc: Exception) -> str:
+        return f"流式输出中断：{type(exc).__name__}: {exc}"
+
+    def _finish_interrupted_stream(self, streamed_parts: list[str], exc: Exception) -> str:
+        message = self._stream_interrupted_message(exc)
+        self.event_bus.publish(Event(EventType.ERROR, {"message": message}, self.session.id))
+        self._record_memory_event("error", {"message": message})
+        notice = f"\n\n[{message}]"
+        self._finish_assistant_message("".join(streamed_parts) + notice if streamed_parts else notice.strip())
+        return notice if streamed_parts else notice.strip()
 
     def _handle_tool_calls(self, response: Response):
         # 显示模型的思考内容
@@ -149,21 +336,41 @@ class AgentCore:
 
         for idx, tc in enumerate(response.tool_calls or []):
             tool_name = tc["function"]["name"]
-            tool_args = json.loads(tc["function"]["arguments"])
+            tool_call_id = tc.get("id") or tc.get("tool_call_id")
+            if not tool_call_id or tool_call_id.strip() == "":
+                tool_call_id = f"fallback_{tool_name}_{idx}"
 
-            self.event_bus.publish(Event(EventType.TOOL_CALLED, {"name": tool_name, "args": tool_args}, self.session.id))
-            self._record_memory_event("tool_call", {"name": tool_name, "args": tool_args})
+            if self._is_tool_blocked(tool_name):
+                result = f"当前 Agent 不允许调用工具: {tool_name}"
+            else:
+                try:
+                    tool_args = json.loads(tc["function"]["arguments"])
+                except json.JSONDecodeError as exc:
+                    tool_args = {}
+                    result = f"Tool {tool_name} got invalid JSON arguments: {exc.msg}"
+                    logger.warning("Invalid tool arguments for %s: %s", tool_name, exc)
+                else:
+                    if tool_name == "write_file" and self._is_write_file_content_missing(tool_args):
+                        draft_content = self._find_recent_assistant_draft_content()
+                        if draft_content is None:
+                            return self._handle_write_file_missing_content(tool_args, tool_call_id)
+                        tool_args["content"] = draft_content
+                        self._replace_stored_tool_call_arguments(idx, tool_args)
 
-            result = execute_tool(tool_name, tool_args, context=self.tool_context)
+                    self.event_bus.publish(Event(EventType.TOOL_CALLED, {"name": tool_name, "args": tool_args}, self.session.id))
+                    self._record_memory_event("tool_call", {"name": tool_name, "args": tool_args})
+
+                    try:
+                        result = execute_tool(tool_name, tool_args, context=self._tool_execution_context())
+                    except Exception as exc:
+                        result = f"Tool {tool_name} failed: {type(exc).__name__}: {exc}"
+                        logger.warning("Tool execution failed: %s", tool_name, exc_info=True)
+
             result_text = str(result)
             repeated_missing_arg_error = self._is_repeated_missing_argument_error(tool_name, result_text)
 
             self.event_bus.publish(Event(EventType.TOOL_RESULT, {"name": tool_name, "result": result}, self.session.id))
             self._record_memory_event("tool_result", {"name": tool_name, "result": str(result)})
-
-            tool_call_id = tc.get("id") or tc.get("tool_call_id")
-            if not tool_call_id or tool_call_id.strip() == "":
-                tool_call_id = f"fallback_{tool_name}_{idx}"
 
             self.session.add_message("tool", result_text, tool_call_id=tool_call_id, name=tool_name)
 
@@ -178,10 +385,12 @@ class AgentCore:
         return ToolHandlingOutcome(messages)
 
     def chat(self, user_message: str) -> str:
-        skills = self._select_skills(user_message)
-        tools = self._get_tools_for_skills(skills)
+        tools = self._get_tools()
         messages = self._start_turn(user_message)
-        messages = self._inject_skill_prompt(messages, skills)
+        messages = self._inject_base_system_prompt(messages)
+        messages = self._inject_role_prompt(messages)
+        messages = self._inject_skill_catalog_prompt(messages)
+        messages = self._inject_tool_usage_prompt(messages, tools)
 
         for _ in range(self.max_tool_rounds):
             response = self.provider.chat(messages, tools)
@@ -191,7 +400,10 @@ class AgentCore:
                 if outcome.recovery_message:
                     return outcome.recovery_message
                 messages = outcome.messages
-                messages = self._inject_skill_prompt(messages, skills)
+                messages = self._inject_base_system_prompt(messages)
+                messages = self._inject_role_prompt(messages)
+                messages = self._inject_skill_catalog_prompt(messages)
+                messages = self._inject_tool_usage_prompt(messages, tools)
             else:
                 self._finish_assistant_message(response.content)
                 return response.content
@@ -202,22 +414,31 @@ class AgentCore:
         raise RuntimeError(message)
 
     def chat_stream(self, user_message: str) -> Iterator[str]:
-        skills = self._select_skills(user_message)
-        tools = self._get_tools_for_skills(skills)
+        tools = self._get_tools()
         messages = self._start_turn(user_message)
-        messages = self._inject_skill_prompt(messages, skills)
+        messages = self._inject_base_system_prompt(messages)
+        messages = self._inject_role_prompt(messages)
+        messages = self._inject_skill_catalog_prompt(messages)
+        messages = self._inject_tool_usage_prompt(messages, tools)
 
         for _ in range(self.max_tool_rounds):
             response = None
+            streamed_parts = []
 
-            for stream_event in self.provider.chat_stream_response(messages, tools):
-                if stream_event.type == "content_delta" and stream_event.content:
-                    self.event_bus.publish(
-                        Event(EventType.MESSAGE_DELTA, {"content": stream_event.content}, self.session.id)
-                    )
-                    yield stream_event.content
-                elif stream_event.type == "message_end":
-                    response = stream_event.response
+            try:
+                for stream_event in self.provider.chat_stream_response(messages, tools):
+                    if stream_event.type == "content_delta" and stream_event.content:
+                        streamed_parts.append(stream_event.content)
+                        self.event_bus.publish(
+                            Event(EventType.MESSAGE_DELTA, {"content": stream_event.content}, self.session.id)
+                        )
+                        yield stream_event.content
+                    elif stream_event.type == "message_end":
+                        response = stream_event.response
+            except Exception as exc:
+                logger.warning("Streaming response interrupted", exc_info=True)
+                yield self._finish_interrupted_stream(streamed_parts, exc)
+                return
 
             if response is None:
                 response = Response(content="", tool_calls=None, finish_reason="stop")
@@ -228,7 +449,10 @@ class AgentCore:
                     yield outcome.recovery_message
                     return
                 messages = outcome.messages
-                messages = self._inject_skill_prompt(messages, skills)
+                messages = self._inject_base_system_prompt(messages)
+                messages = self._inject_role_prompt(messages)
+                messages = self._inject_skill_catalog_prompt(messages)
+                messages = self._inject_tool_usage_prompt(messages, tools)
             else:
                 self._finish_assistant_message(response.content)
                 return

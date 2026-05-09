@@ -2,15 +2,9 @@
 name: outline-generator
 description: 生成、细化和整理小说大纲
 triggers:
-  - 大纲
-  - 总纲
-  - 卷纲
-  - 细纲
-  - 章节细纲
-  - 设定框架
-  - 剧情规划
-  - 故事线
-  - 世界观
+  - 用户要求生成、细化或整理小说总纲、卷纲、章节细纲、剧情规划、故事线或世界观框架时。
+  - 用户想把零散设定、灵感或剧情想法整理成结构化大纲和后续推进方案时。
+  - 用户要求保存大纲，并且大纲内容已经确认或需要整理成 Markdown 文件时。
 allowed_tools:
   - read_file
   - write_file
@@ -31,8 +25,9 @@ priority: 20
 
 ## 上下文读取
 
-- 如用户提到已有小说，优先使用会话中的 `novel_id` 定位 `novels/{novel_id}/` 下的 Markdown 文件。
-- 如用户要求续接或细化已有大纲，使用 `search_files` 或 `list_files` 查找 `novels/{novel_id}/outlines/*.md`，再用 `read_file` 读取。
+- 文件路径使用当前 sandbox 相对路径，不要加 `novels/` 前缀。
+- 如用户提到已有小说，优先定位 `{novel_slug}/` 下的 Markdown 文件。
+- 如用户要求续接或细化已有大纲，使用 `search_files` 或 `list_files` 查找 `{novel_slug}/outlines/*.md`，再用 `read_file` 读取。
 - 不确定要细化哪个大纲时，先询问用户，不要猜测覆盖。
 
 ## 工作流程
@@ -49,7 +44,7 @@ priority: 20
 ## 保存规则
 
 - 保存大纲时只使用 `write_file` 或 `edit_file`，不要使用领域保存工具。
-- 默认写入 `novels/{novel_id}/outlines/{outline_id}.md`。
+- 默认写入 `{novel_slug}/outlines/{outline_id}.md`，这是当前 sandbox 相对路径，不要加 `novels/` 前缀。
 - `outline_id` 未指定时可建议 `main`、`volume_01` 或 `chapters_01_10` 并征求确认。
 - 文件类型必须是 Markdown，扩展名必须是 `.md`。
 - 文件内容使用固定格式，不依赖工具的 JSON 或参数格式限制。

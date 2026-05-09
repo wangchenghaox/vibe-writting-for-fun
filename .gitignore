@@ -16,7 +16,7 @@ dist/
 *.db
 *.sqlite
 data/
-data_bk/
+data_*
 
 # IDE
 .vscode/

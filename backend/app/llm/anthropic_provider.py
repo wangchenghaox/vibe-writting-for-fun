@@ -4,8 +4,22 @@ import anthropic
 from .provider import LLMProvider, Response, StreamEvent
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str, base_url: str):
-        self.client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str,
+        timeout: float = 120.0,
+        max_retries: int = 2,
+    ):
+        self.timeout = float(timeout)
+        self.max_retries = int(max_retries)
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+        )
         self.model = model
 
     def _prepare_messages(self, messages: List[Dict[str, Any]]):
@@ -77,9 +91,15 @@ class AnthropicProvider(LLMProvider):
         if system_msg:
             kwargs["system"] = system_msg
         if tools:
-            kwargs["tools"] = [self._convert_tool(t) for t in tools]
+            kwargs["tools"] = self._convert_tools(tools, strict=True)
 
-        response = self.client.messages.create(**kwargs)
+        try:
+            response = self.client.messages.create(**kwargs)
+        except anthropic.BadRequestError as exc:
+            if not tools or not self._is_strict_tool_schema_error(exc):
+                raise
+            kwargs["tools"] = self._convert_tools(tools, strict=False)
+            response = self.client.messages.create(**kwargs)
         return self._response_from_message(response)
 
     def chat_stream(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Iterator[str]:
@@ -94,19 +114,39 @@ class AnthropicProvider(LLMProvider):
         if system_msg:
             kwargs["system"] = system_msg
         if tools:
-            kwargs["tools"] = [self._convert_tool(t) for t in tools]
+            kwargs["tools"] = self._convert_tools(tools, strict=True)
 
-        with self.client.messages.stream(**kwargs) as stream:
-            for text in stream.text_stream:
-                yield StreamEvent(type="content_delta", content=text)
-            response = stream.get_final_message()
+        try:
+            with self.client.messages.stream(**kwargs) as stream:
+                for text in stream.text_stream:
+                    yield StreamEvent(type="content_delta", content=text)
+                response = stream.get_final_message()
+        except anthropic.BadRequestError as exc:
+            if not tools or not self._is_strict_tool_schema_error(exc):
+                raise
+            kwargs["tools"] = self._convert_tools(tools, strict=False)
+            with self.client.messages.stream(**kwargs) as stream:
+                for text in stream.text_stream:
+                    yield StreamEvent(type="content_delta", content=text)
+                response = stream.get_final_message()
 
         yield StreamEvent(type="message_end", response=self._response_from_message(response))
 
-    def _convert_tool(self, tool: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_tools(self, tools: List[Dict[str, Any]], strict: bool = True) -> List[Dict[str, Any]]:
+        return [self._convert_tool(tool, strict=strict) for tool in tools]
+
+    def _convert_tool(self, tool: Dict[str, Any], strict: bool = True) -> Dict[str, Any]:
         func = tool["function"]
-        return {
+        converted = {
             "name": func["name"],
             "description": func["description"],
             "input_schema": func["parameters"]
         }
+        if strict:
+            converted["strict"] = True
+        return converted
+
+    def _is_strict_tool_schema_error(self, exc: anthropic.BadRequestError) -> bool:
+        body = getattr(exc, "body", None)
+        haystack = f"{exc} {body}".lower()
+        return "strict" in haystack
