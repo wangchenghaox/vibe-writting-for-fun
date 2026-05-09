@@ -2,6 +2,7 @@ import json
 import re
 import shlex
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +34,7 @@ BLOCKED_COMMANDS = {
 ALLOWED_COMMANDS = {
     "pwd",
     "ls",
+    "mkdir",
     "find",
     "rg",
     "grep",
@@ -41,11 +43,15 @@ ALLOWED_COMMANDS = {
     "tail",
     "wc",
     "sed",
+    "sort",
+    "uniq",
+    "cut",
     "git",
     "pytest",
     "uv",
 }
 READ_ONLY_GIT_COMMANDS = {"status", "diff", "log", "show", "branch", "rev-parse"}
+PIPELINE_UNSAFE_COMMANDS = {"mkdir"}
 
 
 def _json(data) -> str:
@@ -85,46 +91,115 @@ def _validate_path_arg(arg: str, root: Path) -> Optional[str]:
     return None
 
 
-def _validate_bash_command(command: str, root: Path) -> tuple[Optional[list[str]], Optional[str]]:
-    if not command or not command.strip():
-        return None, "command 不能为空"
-    if any(token in command for token in ("&&", "||", ";", "|", "<", ">", "`", "$(", "\n")):
-        return None, "操作被拒绝: 受限 bash 不支持管道、重定向、命令串联或命令替换"
-
+def _split_pipeline(command: str) -> tuple[Optional[list[list[str]]], Optional[str]]:
     try:
-        args = shlex.split(command)
+        lexer = shlex.shlex(command, posix=True, punctuation_chars="|")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
     except ValueError as exc:
         return None, f"命令解析失败: {exc}"
-    if not args:
+
+    if not tokens:
         return None, "command 不能为空"
 
+    commands = [[]]
+    for token in tokens:
+        if token == "|":
+            if not commands[-1]:
+                return None, "操作被拒绝: 管道两侧必须是完整命令"
+            commands.append([])
+            continue
+        commands[-1].append(token)
+
+    if not commands[-1]:
+        return None, "操作被拒绝: 管道两侧必须是完整命令"
+
+    return commands, None
+
+
+def _validate_bash_segment(args: list[str], root: Path, pipeline_length: int) -> Optional[str]:
     command_name = Path(args[0]).name
     if command_name in BLOCKED_COMMANDS:
-        return None, f"操作被拒绝: 不允许执行 {command_name}"
+        return f"操作被拒绝: 不允许执行 {command_name}"
     if command_name not in ALLOWED_COMMANDS:
-        return None, f"操作被拒绝: 受限 bash 暂不允许执行 {command_name}"
+        return f"操作被拒绝: 受限 bash 暂不允许执行 {command_name}"
+    if pipeline_length > 1 and command_name in PIPELINE_UNSAFE_COMMANDS:
+        return f"操作被拒绝: {command_name} 不能用于管道"
     if command_name == "git" and len(args) > 1 and args[1] not in READ_ONLY_GIT_COMMANDS:
-        return None, f"操作被拒绝: git {args[1]} 不在只读白名单内"
+        return f"操作被拒绝: git {args[1]} 不在只读白名单内"
     if command_name == "uv" and args[1:3] != ["run", "pytest"]:
-        return None, "操作被拒绝: uv 仅允许执行 uv run pytest"
+        return "操作被拒绝: uv 仅允许执行 uv run pytest"
     if command_name == "sed" and any(arg == "-i" or arg.startswith("-i") for arg in args[1:]):
-        return None, "操作被拒绝: sed -i 会修改文件"
+        return "操作被拒绝: sed -i 会修改文件"
 
     for arg in args[1:]:
         if arg.startswith("-") or not _looks_like_path_arg(arg):
             continue
         error = _validate_path_arg(arg, root)
         if error:
+            return error
+
+    return None
+
+
+def _validate_bash_command(command: str, root: Path) -> tuple[Optional[list[list[str]]], Optional[str]]:
+    if not command or not command.strip():
+        return None, "command 不能为空"
+    if any(token in command for token in ("&&", "||", ";", "<", ">", "`", "$(", "\n")):
+        return None, "操作被拒绝: 受限 bash 不支持重定向、命令串联或命令替换"
+
+    commands, error = _split_pipeline(command)
+    if error:
+        return None, error
+
+    for args in commands:
+        error = _validate_bash_segment(args, root, pipeline_length=len(commands))
+        if error:
             return None, error
 
-    return args, None
+    return commands, None
+
+
+def _run_bash_commands(commands: list[list[str]], root: Path, timeout: int):
+    if len(commands) == 1:
+        return subprocess.run(
+            commands[0],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+
+    stdout = None
+    stderr_parts = []
+    deadline = time.monotonic() + timeout
+    completed = None
+    for args in commands:
+        remaining = max(1, deadline - time.monotonic())
+        completed = subprocess.run(
+            args,
+            cwd=root,
+            input=stdout,
+            capture_output=True,
+            text=True,
+            timeout=remaining,
+            check=False,
+        )
+        stdout = completed.stdout
+        if completed.stderr:
+            stderr_parts.append(completed.stderr.rstrip("\n"))
+
+    completed.stderr = "\n".join(stderr_parts)
+    return completed
 
 
 @tool(
     name="bash",
     description=(
-        "Run a restricted shell command inside the current workspace. Allows common read-only/search/test "
-        "commands and rejects destructive commands, command chaining, pipes, redirects, and paths outside workdir."
+        "Run a restricted shell command inside the current workspace. Allows common read/search/test commands, "
+        "mkdir inside workdir, and simple pipelines. Rejects destructive commands, command chaining, redirects, "
+        "command substitution, and paths outside workdir."
     ),
     context_params=["workdir"],
     parameter_descriptions={
@@ -134,22 +209,15 @@ def _validate_bash_command(command: str, root: Path) -> tuple[Optional[list[str]
 )
 def bash(command: str, timeout_seconds: int = 10, workdir: str = None) -> str:
     root = _workdir(workdir)
-    args, error = _validate_bash_command(command, root)
+    commands, error = _validate_bash_command(command, root)
     if error:
         return error
 
     timeout = max(1, min(timeout_seconds, MAX_BASH_TIMEOUT_SECONDS))
     try:
-        completed = subprocess.run(
-            args,
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        completed = _run_bash_commands(commands, root, timeout)
     except FileNotFoundError:
-        return f"命令不存在: {args[0]}"
+        return f"命令不存在: {commands[0][0]}"
     except subprocess.TimeoutExpired:
         return f"命令超时: 超过 {timeout} 秒"
 
@@ -281,7 +349,11 @@ def todo_list(
     ],
     parameter_descriptions={
         "name": "Short sub-agent name, such as writer, reviewer, or planner.",
-        "task": "Optional initial task to execute immediately with the sub-agent.",
+        "task": (
+            "Optional initial task to execute immediately with the sub-agent. Use this as a 任务单: describe the "
+            "goal, constraints, context paths to read, output format, target file path, and acceptance criteria. "
+            "不要把主 Agent 自己生成的大段正文、大纲、改写稿或审稿意见放进 task 让子 Agent 只负责保存。"
+        ),
     },
 )
 def create_sub_agent(

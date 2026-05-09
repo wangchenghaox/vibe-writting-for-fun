@@ -70,6 +70,16 @@ def test_file_tools_use_workdir_as_only_sandbox(monkeypatch, tmp_path):
     assert read_file(backend_skill_path).startswith("操作被拒绝")
 
 
+def test_read_file_resolves_skill_alias_when_workdir_is_configured(monkeypatch, tmp_path):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setattr(settings, "WORKDIR", sandbox)
+
+    content = read_file("skills/outline-generator.md")
+
+    assert "# 大纲生成" in content
+
+
 def test_file_tools_list_grep_and_search(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "WORKDIR", None)
     monkeypatch.setattr(settings, "DATA_DIR", tmp_path / "data")

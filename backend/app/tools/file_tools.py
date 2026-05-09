@@ -33,6 +33,14 @@ def _allowed_roots() -> list[Path]:
     ]
 
 
+def _skill_alias_candidate(raw: Path) -> Optional[Path]:
+    if raw.is_absolute():
+        return None
+    if not raw.parts or raw.parts[0] != "skills":
+        return None
+    return BACKEND_ROOT / raw
+
+
 def _path_candidates(path: str) -> list[Path]:
     raw = Path(path)
     workdir = _workdir_root()
@@ -54,7 +62,15 @@ def _path_candidates(path: str) -> list[Path]:
     return candidates
 
 
-def _resolve_safe_path(path: str) -> tuple[Optional[Path], Optional[str]]:
+def _resolve_safe_path(path: str, allow_skill_alias: bool = False) -> tuple[Optional[Path], Optional[str]]:
+    if allow_skill_alias:
+        raw = Path(path)
+        candidate = _skill_alias_candidate(raw)
+        if candidate is not None:
+            resolved = candidate.resolve(strict=False)
+            if resolved.is_relative_to(_skills_root().resolve()):
+                return resolved, None
+
     for candidate in _path_candidates(path):
         resolved = candidate.resolve(strict=False)
         if any(resolved.is_relative_to(root) for root in _allowed_roots()):
@@ -65,6 +81,11 @@ def _resolve_safe_path(path: str) -> tuple[Optional[Path], Optional[str]]:
 
 
 def _display_path(path: Path) -> str:
+    try:
+        return str(Path("skills") / path.resolve(strict=False).relative_to(_skills_root().resolve()))
+    except ValueError:
+        pass
+
     workdir = _workdir_root()
     if workdir is not None:
         try:
@@ -75,7 +96,6 @@ def _display_path(path: Path) -> str:
 
     for label, root in (
         ("novels", (Path(settings.DATA_DIR) / "novels").resolve()),
-        ("skills", _skills_root().resolve()),
     ):
         try:
             return str(Path(label) / path.resolve(strict=False).relative_to(root))
@@ -90,7 +110,7 @@ def _json(data) -> str:
 
 @tool(name="read_file", description="Read a text file from allowed novel or skill directories")
 def read_file(path: str, max_chars: int = 20000, offset: int = 0) -> str:
-    resolved, error = _resolve_safe_path(path)
+    resolved, error = _resolve_safe_path(path, allow_skill_alias=True)
     if error:
         return error
     if not resolved.exists():
@@ -188,7 +208,7 @@ def rename_file(source_path: str, target_path: str, overwrite: bool = False) -> 
 @tool(name="list_files", description="List files under allowed novel or skill directories")
 def list_files(path: str = "", pattern: str = "*", max_results: int = 100) -> str:
     if path:
-        base, error = _resolve_safe_path(path)
+        base, error = _resolve_safe_path(path, allow_skill_alias=True)
         if error:
             return error
         bases = [base]
@@ -218,7 +238,7 @@ def grep_files(pattern: str, path: str = "", file_glob: str = "*", max_results: 
         return f"无效正则: {e}"
 
     if path:
-        base, error = _resolve_safe_path(path)
+        base, error = _resolve_safe_path(path, allow_skill_alias=True)
         if error:
             return error
         bases = [base]
@@ -252,7 +272,7 @@ def grep_files(pattern: str, path: str = "", file_glob: str = "*", max_results: 
 def search_files(query: str, path: str = "", max_results: int = 50) -> str:
     needle = query.lower()
     if path:
-        base, error = _resolve_safe_path(path)
+        base, error = _resolve_safe_path(path, allow_skill_alias=True)
         if error:
             return error
         bases = [base]
