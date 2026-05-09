@@ -2,15 +2,9 @@
 name: character-designer
 description: 设计人物设定、关系和成长弧
 triggers:
-  - 人设
-  - 角色
-  - 角色卡
-  - 人物
-  - 人物关系
-  - 成长弧
-  - 配角
-  - 反派
-  - 主角
+  - 用户要求设计主角、反派、配角、角色卡、人设、人物关系或成长弧时。
+  - 用户想细化角色动机、能力、背景、性格缺陷、关系冲突或阶段变化时。
+  - 用户要求保存角色设定，并且角色卡内容已经确认或需要整理成 Markdown 文件时。
 allowed_tools:
   - read_file
   - write_file
@@ -31,9 +25,10 @@ priority: 15
 
 ## 上下文读取
 
-- 如用户指定小说，优先使用会话中的 `novel_id` 定位 `novels/{novel_id}/` 下的 Markdown 文件。
-- 如角色需要参考已有大纲，使用 `search_files` 或 `list_files` 查找 `novels/{novel_id}/outlines/*.md`，再用 `read_file` 读取。
-- 如角色需要参考已有角色文件，查找 `novels/{novel_id}/characters/*.md`。
+- 文件路径使用当前 sandbox 相对路径，不要加 `novels/` 前缀。
+- 如用户指定小说，优先定位 `{novel_slug}/` 下的 Markdown 文件。
+- 如角色需要参考已有大纲，使用 `search_files` 或 `list_files` 查找 `{novel_slug}/outlines/*.md`，再用 `read_file` 读取。
+- 如角色需要参考已有角色文件，查找 `{novel_slug}/characters/*.md`。
 - 如果已有设定不足以判断角色定位，先询问角色功能或故事题材。
 
 ## 工作流程
@@ -50,7 +45,7 @@ priority: 15
 ## 保存规则
 
 - 保存角色卡时只使用 `write_file` 或 `edit_file`，不要使用领域保存工具。
-- 角色卡默认写入 `novels/{novel_id}/characters/{character_id}.md`。
+- 角色卡默认写入 `{novel_slug}/characters/{character_id}.md`，这是当前 sandbox 相对路径，不要加 `novels/` 前缀。
 - 并入大纲时先用 `read_file` 读取原大纲，再用 `edit_file` 合并修改。
 - 不要只保存新增片段导致旧大纲丢失。
 - 文件类型必须是 Markdown，扩展名必须是 `.md`。

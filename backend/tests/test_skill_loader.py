@@ -45,7 +45,7 @@ priority: 20
     assert "请检查情节" in skill.content
 
 
-def test_selects_matching_skills_by_trigger_and_priority(tmp_path):
+def test_catalog_orders_skills_by_priority(tmp_path):
     (tmp_path / "low.md").write_text(
         """---
 name: low
@@ -71,12 +71,13 @@ high body
 
     loader = SkillLoader(skills_dir=tmp_path)
 
-    selected = loader.select_skills("请帮我审查第一章")
+    prompt = loader.build_catalog_prompt()
 
-    assert [skill.name for skill in selected] == ["high", "low"]
+    assert prompt.index("技能: high") < prompt.index("技能: low")
+    assert "触发时机:\n- 审查" in prompt
 
 
-def test_selects_matching_skills_by_regex_trigger(tmp_path):
+def test_discovers_regex_trigger_as_catalog_metadata(tmp_path):
     (tmp_path / "chapter-writer.md").write_text(
         """---
 name: chapter-writer
@@ -91,12 +92,16 @@ chapter body
     )
 
     loader = SkillLoader(skills_dir=tmp_path)
+    skill = loader.discover_skills()["chapter-writer"]
+    prompt = loader.build_catalog_prompt()
 
-    assert [skill.name for skill in loader.select_skills("请创作第二章")] == ["chapter-writer"]
-    assert [skill.name for skill in loader.select_skills("保存第2章的内容")] == ["chapter-writer"]
+    assert skill.triggers == [
+        "re:(写|生成|创作|保存).{0,12}第[0-9一二三四五六七八九十百千万两]+章"
+    ]
+    assert "触发时机:\n- re:(写|生成|创作|保存).{0,12}第" in prompt
 
 
-def test_builds_active_skill_prompt(tmp_path):
+def test_load_skill_returns_full_content_without_prompt_injection(tmp_path):
     (tmp_path / "writer.md").write_text(
         """---
 name: chapter-writer
@@ -112,13 +117,38 @@ allowed_tools: [load_outline, save_chapter]
     )
 
     loader = SkillLoader(skills_dir=tmp_path)
-    skill = loader.select_skills("写章节")[0]
+    content = loader.load_skill("chapter-writer")
 
-    prompt = loader.build_prompt([skill])
+    assert "按大纲写作。" in content
+    assert loader.get_loaded_skills()["chapter-writer"] == content
 
-    assert "已启用技能: chapter-writer" in prompt
-    assert "允许工具: load_outline, save_chapter" in prompt
-    assert "按大纲写作。" in prompt
+
+def test_builds_skill_catalog_prompt_with_basic_metadata(tmp_path):
+    (tmp_path / "chapter-writer.md").write_text(
+        """---
+name: chapter-writer
+description: 章节写作
+triggers: [写章节, 保存章节]
+allowed_tools: [read_file, write_file]
+priority: 5
+---
+# 章节写作
+""",
+        encoding="utf-8",
+    )
+
+    loader = SkillLoader(skills_dir=tmp_path)
+
+    prompt = loader.build_catalog_prompt()
+
+    assert "你可以使用以下本地创作技能" in prompt
+    assert "技能: chapter-writer" in prompt
+    assert "说明: 章节写作" in prompt
+    assert "触发时机:\n- 写章节\n- 保存章节" in prompt
+    assert "说明文件: skills/chapter-writer.md" in prompt
+    assert "可用工具" not in prompt
+    assert "read_file, write_file" not in prompt
+    assert "`read_file`" not in prompt
 
 
 def test_default_business_skills_are_discoverable():
@@ -142,20 +172,18 @@ def test_default_business_skills_are_discoverable():
     assert "review_chapter" not in skills["content-reviewer"].allowed_tools
 
 
-def test_requirement_confirmer_triggers_before_creation_skills():
+def test_requirement_confirmer_trigger_metadata_is_visible_in_catalog():
     loader = SkillLoader()
 
-    cases = [
-        ("请创作第二章", "chapter-writer"),
-        ("设计一个主角", "character-designer"),
-        ("写个大纲", "outline-generator"),
-        ("帮我想一个玄幻故事", "requirement-confirmer"),
-    ]
+    skills = loader.discover_skills()
+    prompt = loader.build_catalog_prompt()
 
-    for message, expected_skill in cases:
-        selected_names = [skill.name for skill in loader.select_skills(message)]
-        assert selected_names[0] == "requirement-confirmer"
-        assert expected_skill in selected_names
+    assert any("用户准备开始" in trigger for trigger in skills["requirement-confirmer"].triggers)
+    assert any("保存" in trigger and "完整内容" in trigger for trigger in skills["requirement-confirmer"].triggers)
+    assert prompt.index("技能: requirement-confirmer") < prompt.index("技能: chapter-writer")
+    assert "技能: character-designer" in prompt
+    assert "技能: outline-generator" in prompt
+    assert "re:" not in prompt
 
 
 def test_requirement_confirmer_uses_safe_tools_and_option_guidance():
@@ -251,10 +279,20 @@ def test_creation_skills_write_markdown_with_basic_file_tools():
         assert ".md" in skill.content
         assert "固定格式" in skill.content
 
-    assert "novels/{novel_id}/chapters/{chapter_id}.md" in skills["chapter-writer"].content
-    assert "novels/{novel_id}/outlines/{outline_id}.md" in skills["outline-generator"].content
-    assert "novels/{novel_id}/characters/{character_id}.md" in skills["character-designer"].content
-    assert "novels/{novel_id}/reviews/{chapter_id}_review.md" in skills["content-reviewer"].content
+    assert "{novel_slug}/chapters/{chapter_id}.md" in skills["chapter-writer"].content
+    assert "{novel_slug}/outlines/{outline_id}.md" in skills["outline-generator"].content
+    assert "{novel_slug}/characters/{character_id}.md" in skills["character-designer"].content
+    assert "{novel_slug}/reviews/{chapter_id}_review.md" in skills["content-reviewer"].content
+
+    for skill_name in (
+        "chapter-writer",
+        "outline-generator",
+        "character-designer",
+        "content-reviewer",
+    ):
+        assert "当前 sandbox 相对路径" in skills[skill_name].content
+        assert "不要加 `novels/` 前缀" in skills[skill_name].content
+        assert "novels/{novel_id}" not in skills[skill_name].content
 
 
 def test_outline_and_character_skills_confirm_after_design_before_followup_actions():
@@ -271,12 +309,12 @@ def test_outline_and_character_skills_confirm_after_design_before_followup_actio
     assert "用户确认前不要保存" in character_designer
 
 
-def test_default_chapter_writer_matches_ordinal_chapter_requests():
-    loader = SkillLoader()
+def test_default_chapter_writer_exposes_ordinal_chapter_trigger_metadata():
+    skill = SkillLoader().discover_skills()["chapter-writer"]
 
-    for message in ("创作第二章", "写第2章", "保存第二章的内容"):
-        selected_names = [skill.name for skill in loader.select_skills(message)]
-        assert "chapter-writer" in selected_names
+    assert any("第几章" in trigger for trigger in skill.triggers)
+    assert any("完整章节正文" in trigger for trigger in skill.triggers)
+    assert all(not trigger.startswith("re:") for trigger in skill.triggers)
 
 
 def test_skill_curator_is_discoverable_with_file_tools():
@@ -284,7 +322,7 @@ def test_skill_curator_is_discoverable_with_file_tools():
 
     skill = loader.discover_skills()["skill-curator"]
 
-    assert "优化 skill" in skill.triggers
+    assert any("优化" in trigger and "skill" in trigger for trigger in skill.triggers)
     assert "write_file" in skill.allowed_tools
     assert "edit_file" in skill.allowed_tools
     assert "delete_file" not in skill.allowed_tools

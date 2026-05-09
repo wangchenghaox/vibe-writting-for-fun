@@ -20,18 +20,22 @@ class SubAgentManager:
         tool_context: dict | None = None,
         memory_recorder_factory=None,
         memory_enabled: bool = False,
+        blocked_tool_names: set[str] | None = None,
     ) -> str:
         """创建子代理"""
         from ..agent.core import AgentCore
+        from ..agent.session import Session
         from ..memory.event_recorder import MemoryEventRecorder
 
         index = self._next_subagent_index
         self._next_subagent_index += 1
         subagent_id = f"subagent_{name}_{index}"
-        context = dict(tool_context or {})
+        context = dict(session.context)
+        context.update(tool_context or {})
         context["agent_name"] = name
         context["agent_instance_id"] = subagent_id
-        session.context.update(context)
+        subagent_session = Session(subagent_id)
+        subagent_session.context.update(context)
 
         memory_recorder = None
         if memory_enabled:
@@ -45,10 +49,12 @@ class SubAgentManager:
             )
         subagent = AgentCore(
             provider,
-            session,
+            subagent_session,
             tool_context=context,
             memory_recorder=memory_recorder,
             memory_enabled=memory_enabled,
+            blocked_tool_names=set(blocked_tool_names or set()) | {"create_sub_agent"},
+            can_create_sub_agent=False,
         )
         self.subagents[subagent_id] = subagent
 

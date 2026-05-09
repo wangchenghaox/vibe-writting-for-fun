@@ -2,15 +2,9 @@
 name: chapter-writer
 description: 根据大纲和上下文生成或改写章节
 triggers:
-  - 写章节
-  - 生成章节
-  - 创作章节
-  - 起草章节
-  - 续写
-  - 改写章节
-  - 保存章节
-  - "re:(写|生成|创作|起草|续写|改写|保存).{0,12}第[0-9一二三四五六七八九十百千万两]+章"
-  - "re:第[0-9一二三四五六七八九十百千万两]+章.{0,12}(写|生成|创作|起草|续写|改写|保存)"
+  - 用户要求写、生成、创作、起草、续写或改写某一章，尤其明确提到第几章、章节标题或章节正文时。
+  - 用户已经确认章节方向，需要输出完整章节正文，而不是只做大纲、人设或审稿时。
+  - 用户要求保存章节，并且当前对话或文件中已有完整章节正文需要写入 Markdown 时。
 allowed_tools:
   - read_file
   - write_file
@@ -31,8 +25,9 @@ priority: 25
 
 ## 上下文读取
 
-- 如用户指定大纲，使用 `search_files` 或 `list_files` 查找 `novels/{novel_id}/outlines/*.md`，再用 `read_file` 读取。
-- 如需要承接前文，先用 `list_files` 查看 `novels/{novel_id}/chapters/*.md`，再用 `read_file` 读取相邻章节。
+- 文件路径使用当前 sandbox 相对路径，不要加 `novels/` 前缀。
+- 如用户指定大纲，使用 `search_files` 或 `list_files` 查找 `{novel_slug}/outlines/*.md`，再用 `read_file` 读取。
+- 如需要承接前文，先用 `list_files` 查看 `{novel_slug}/chapters/*.md`，再用 `read_file` 读取相邻章节。
 - 未找到前文或大纲时可以继续写，但要在回复中说明依据来自当前对话和用户要求。
 
 ## 工作流程
@@ -47,7 +42,7 @@ priority: 25
 ## 保存规则
 
 - 保存章节时只使用 `write_file` 或 `edit_file`，不要使用领域保存工具。
-- 新章节默认写入 `novels/{novel_id}/chapters/{chapter_id}.md`。
+- 新章节默认写入 `{novel_slug}/chapters/{chapter_id}.md`，这是当前 sandbox 相对路径，不要加 `novels/` 前缀。
 - 覆盖已有章节时先用 `read_file` 读取原文，再用 `edit_file` 替换；新建章节用 `write_file`。
 - 文件类型必须是 Markdown，扩展名必须是 `.md`。
 - 文件内容使用固定格式，不依赖工具的 JSON 或参数格式限制。

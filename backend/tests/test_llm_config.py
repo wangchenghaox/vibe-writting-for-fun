@@ -27,6 +27,7 @@ def test_create_provider_supports_openai_mode(tmp_path):
 
     assert provider.__class__.__name__ == "OpenAICompatibleProvider"
     assert provider.model == "gpt-test"
+    assert provider.timeout == 120.0
 
 
 def test_create_provider_supports_claude_mode(tmp_path):
@@ -47,6 +48,31 @@ def test_create_provider_supports_claude_mode(tmp_path):
 
     assert provider.__class__.__name__ == "AnthropicProvider"
     assert provider.model == "claude-test"
+    assert provider.timeout == 120.0
+
+
+def test_create_provider_uses_configured_timeout_and_retries(tmp_path):
+    config_path = write_llm_config(
+        tmp_path,
+        """
+        llm:
+          default: kimi_coding
+          timeout: 240
+          max_retries: 4
+          providers:
+            kimi_coding:
+              type: kimi_coding
+              api_key: test-kimi-key
+              model: kimi-test
+              base_url: https://api.kimi.com/coding/
+        """,
+    )
+
+    provider = create_provider(str(config_path))
+
+    assert provider.__class__.__name__ == "AnthropicProvider"
+    assert provider.timeout == 240.0
+    assert provider.max_retries == 4
 
 
 def test_load_config_resolves_default_provider_from_env(tmp_path, monkeypatch):

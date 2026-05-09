@@ -34,6 +34,16 @@ def test_file_tools_read_write_edit_rename_delete_inside_novels(monkeypatch, tmp
     assert "不存在" in read_file("novels/novel_a/renamed.txt")
 
 
+def test_read_file_supports_offset_for_chunked_reads(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "WORKDIR", None)
+    monkeypatch.setattr(settings, "DATA_DIR", tmp_path / "data")
+
+    write_file("novels/novel_a/long.txt", "0123456789")
+
+    assert read_file("novels/novel_a/long.txt", max_chars=4) == "0123"
+    assert read_file("novels/novel_a/long.txt", max_chars=4, offset=4) == "4567"
+
+
 def test_file_tools_block_path_traversal(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "WORKDIR", None)
     monkeypatch.setattr(settings, "DATA_DIR", tmp_path / "data")

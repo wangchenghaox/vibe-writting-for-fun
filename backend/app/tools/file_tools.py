@@ -89,7 +89,7 @@ def _json(data) -> str:
 
 
 @tool(name="read_file", description="Read a text file from allowed novel or skill directories")
-def read_file(path: str, max_chars: int = 20000) -> str:
+def read_file(path: str, max_chars: int = 20000, offset: int = 0) -> str:
     resolved, error = _resolve_safe_path(path)
     if error:
         return error
@@ -97,12 +97,28 @@ def read_file(path: str, max_chars: int = 20000) -> str:
         return f"文件不存在: {_display_path(resolved)}"
     if not resolved.is_file():
         return f"不是文件: {_display_path(resolved)}"
+    if offset < 0:
+        return "offset 必须大于等于 0"
+    if max_chars < 0:
+        return "max_chars 必须大于等于 0"
 
     content = resolved.read_text(encoding="utf-8")
-    return content[:max_chars]
+    return content[offset:offset + max_chars]
 
 
-@tool(name="write_file", description="Write a text file within allowed novel or skill directories")
+@tool(
+    name="write_file",
+    description=(
+        "Write a text file within allowed novel or skill directories. Use this only when the exact full file "
+        "content is already available in the conversation or has just been generated. Requires both path and "
+        "complete content; 不要在没有完整内容时调用，不要用 write_file 仅声明保存意图。"
+    ),
+    parameter_descriptions={
+        "path": "Target file path under an allowed novel or skill directory.",
+        "content": "完整文件正文。必填，不能省略；必须传入要写入文件的完整 Markdown 文本，不要只传路径，也不要用空字符串占位。",
+        "overwrite": "Whether to overwrite an existing file. Defaults to true.",
+    },
+)
 def write_file(path: str, content: str, overwrite: bool = True) -> str:
     resolved, error = _resolve_safe_path(path)
     if error:

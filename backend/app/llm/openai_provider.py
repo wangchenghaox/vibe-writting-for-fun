@@ -9,12 +9,14 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAICompatibleProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str, base_url: str):
+    def __init__(self, api_key: str, model: str, base_url: str, timeout: float = 120.0, max_retries: int = 2):
+        self.timeout = float(timeout)
+        self.max_retries = int(max_retries)
         self.client = OpenAI(
             api_key=api_key,
             base_url=base_url,
-            timeout=120.0,
-            max_retries=2,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
         )
         self.model = model
 

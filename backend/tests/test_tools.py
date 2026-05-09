@@ -25,6 +25,19 @@ def test_tool_registration():
     assert result == "Result: hello"
 
 
+def test_execute_tool_returns_error_for_unexpected_arguments():
+    @tool(name="unexpected_argument_tool", description="Reject unexpected arguments")
+    def unexpected_argument_tool(path: str, max_chars: int = 20000) -> str:
+        return f"{path}:{max_chars}"
+
+    result = execute_tool(
+        "unexpected_argument_tool",
+        {"path": "notes.txt", "max_chars": 100, "offset": 100},
+    )
+
+    assert result == "Tool unexpected_argument_tool got unexpected argument(s): offset"
+
+
 def test_tool_schema_generation():
     @tool(name="schema_test", description="Test schema")
     def schema_tool(name: str, age: int) -> str:
@@ -76,6 +89,21 @@ def test_json_domain_tools_are_not_exposed_to_agent_schema():
         "search_files",
         "grep_files",
     }.issubset(tool_names)
+
+
+def test_write_file_schema_warns_content_must_be_complete():
+    schema = next(
+        item for item in get_tool_schemas(allowed_names=["write_file"])
+        if item["function"]["name"] == "write_file"
+    )
+
+    content_description = schema["function"]["parameters"]["properties"]["content"]["description"]
+
+    assert "不要在没有完整内容时调用" in schema["function"]["description"]
+    assert "不要用 write_file 仅声明保存意图" in schema["function"]["description"]
+    assert "完整文件正文" in content_description
+    assert "不能省略" in content_description
+    assert schema["function"]["parameters"]["additionalProperties"] is False
 
 
 def test_legacy_json_helpers_manage_novels_and_documents(tmp_path, monkeypatch):
