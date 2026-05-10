@@ -75,6 +75,56 @@ def test_create_provider_uses_configured_timeout_and_retries(tmp_path):
     assert provider.max_retries == 4
 
 
+def test_create_provider_enables_thinking_by_default(tmp_path):
+    config_path = write_llm_config(
+        tmp_path,
+        """
+        llm:
+          default: openai
+          providers:
+            openai:
+              api_key: test-openai-key
+              model: gpt-test
+              base_url: https://api.openai.com/v1
+        """,
+    )
+
+    provider = create_provider(str(config_path))
+
+    assert provider.thinking_config.enabled is True
+    assert provider.thinking_config.effort == "medium"
+    assert provider.thinking_config.budget_tokens == 1024
+
+
+def test_create_provider_allows_provider_thinking_override(tmp_path):
+    config_path = write_llm_config(
+        tmp_path,
+        """
+        llm:
+          default: claude
+          thinking:
+            enabled: true
+            effort: medium
+            budget_tokens: 1024
+          providers:
+            claude:
+              api_key: test-anthropic-key
+              model: claude-test
+              base_url: https://api.anthropic.com
+              thinking:
+                enabled: false
+                effort: high
+                budget_tokens: 2048
+        """,
+    )
+
+    provider = create_provider(str(config_path))
+
+    assert provider.thinking_config.enabled is False
+    assert provider.thinking_config.effort == "high"
+    assert provider.thinking_config.budget_tokens == 2048
+
+
 def test_load_config_resolves_default_provider_from_env(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "openai")
     config_path = write_llm_config(
@@ -120,3 +170,15 @@ def test_default_config_resolves_kimi_models_from_env(monkeypatch):
 
     assert config["llm"]["providers"]["kimi"]["model"] == "moonshot-test-model"
     assert config["llm"]["providers"]["kimi_coding"]["model"] == "kimi-coding-test-model"
+
+
+def test_default_config_declares_thinking_enabled_by_default(monkeypatch):
+    monkeypatch.delenv("LLM_THINKING_ENABLED", raising=False)
+    monkeypatch.delenv("LLM_THINKING_EFFORT", raising=False)
+    monkeypatch.delenv("LLM_THINKING_BUDGET_TOKENS", raising=False)
+
+    config = load_config("config/llm.yaml")
+
+    assert config["llm"]["thinking"]["enabled"] == "true"
+    assert config["llm"]["thinking"]["effort"] == "medium"
+    assert config["llm"]["thinking"]["budget_tokens"] == "1024"

@@ -2,6 +2,12 @@ llm:
   default: ${LLM_PROVIDER:-kimi}
   timeout: ${LLM_TIMEOUT:-120}
   max_retries: ${LLM_MAX_RETRIES:-2}
+  thinking:
+    enabled: ${LLM_THINKING_ENABLED:-true}
+    effort: ${LLM_THINKING_EFFORT:-medium}
+    budget_tokens: ${LLM_THINKING_BUDGET_TOKENS:-1024}
+    keep: ${LLM_THINKING_KEEP:-all}
+    display: ${LLM_THINKING_DISPLAY:-omitted}
   providers:
     kimi:
       type: kimi

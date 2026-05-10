@@ -33,6 +33,9 @@ priority: 30
 
 ## 上下文读取
 
+- 正式审稿、改写或保存审稿意见前，先按 progress-summarizer 读取小说根目录的 `progress.md`，确认当前进度、最近变更和审查重点。
+- 如果 `progress.md` 不存在，只做轻量目录检查，不要逐个读取所有文件；审稿意见、改写稿或保存结果生成后必须更新进度总结。
+- 主 Agent 委派任务单应写清 `progress.md` 路径；子 Agent 返回结果时说明是否已更新进度总结。
 - 文件路径使用当前 sandbox 相对路径，不要加 `novels/` 前缀。
 - 如果用户只给章节编号，先使用 `search_files` 或 `list_files` 查找 `{novel_slug}/chapters/{chapter_id}.md`，再用 `read_file` 读取章节。
 - 如需对照前后文，使用 `list_files` 和 `read_file` 读取相邻章节 Markdown。
@@ -47,6 +50,7 @@ priority: 30
 5. 按严重程度输出问题：致命、重要、一般、可选优化。
 6. 每条建议都要包含位置、问题、原因和修改方向。
 7. 只有任务单或用户明确要求保存审稿意见、保存改写版时，才调用 `write_file` 或 `edit_file`。
+8. 修改或生成新内容后，更新 `progress.md`，记录审稿状态、影响文件、待确认问题和下一步。
 
 ## 保存规则
 

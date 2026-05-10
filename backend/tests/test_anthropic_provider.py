@@ -4,6 +4,7 @@ import anthropic
 import httpx
 
 from app.llm.anthropic_provider import AnthropicProvider
+from app.llm.provider import ThinkingConfig
 
 
 class FakeMessageStream:
@@ -44,6 +45,117 @@ def test_anthropic_chat_stream_response_uses_stream_helper_without_stream_flag()
     assert [event.content for event in events if event.type == "content_delta"] == ["你", "好"]
     assert events[-1].type == "message_end"
     assert events[-1].response.content == "你好"
+
+
+def test_anthropic_chat_sends_thinking_config_when_enabled():
+    provider = AnthropicProvider(
+        api_key="test",
+        model="test-model",
+        base_url="https://example.test",
+        thinking_config=ThinkingConfig(enabled=True, budget_tokens=2048, display="omitted"),
+    )
+
+    class FakeMessages:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="ok")],
+                stop_reason="end_turn",
+            )
+
+    fake_messages = FakeMessages()
+    provider.client = SimpleNamespace(messages=fake_messages)
+
+    provider.chat([{"role": "user", "content": "hi"}])
+
+    assert fake_messages.calls[0]["thinking"] == {
+        "type": "enabled",
+        "budget_tokens": 2048,
+        "display": "omitted",
+    }
+
+
+def test_anthropic_chat_sends_disabled_thinking_config_when_disabled():
+    provider = AnthropicProvider(
+        api_key="test",
+        model="test-model",
+        base_url="https://example.test",
+        thinking_config=ThinkingConfig(enabled=False),
+    )
+
+    class FakeMessages:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="ok")],
+                stop_reason="end_turn",
+            )
+
+    fake_messages = FakeMessages()
+    provider.client = SimpleNamespace(messages=fake_messages)
+
+    provider.chat([{"role": "user", "content": "hi"}])
+
+    assert fake_messages.calls[0]["thinking"] == {"type": "disabled"}
+
+
+def test_anthropic_response_preserves_thinking_blocks_without_mixing_into_content():
+    provider = AnthropicProvider(api_key="test", model="test-model", base_url="https://example.test")
+    response = provider._response_from_message(SimpleNamespace(
+        content=[
+            SimpleNamespace(
+                type="thinking",
+                thinking="内部推理",
+                signature="sig-1",
+                model_dump=lambda exclude_none=True: {
+                    "type": "thinking",
+                    "thinking": "内部推理",
+                    "signature": "sig-1",
+                },
+            ),
+            SimpleNamespace(type="text", text="公开回复"),
+        ],
+        stop_reason="end_turn",
+    ))
+
+    assert response.content == "公开回复"
+    assert response.reasoning_blocks == [{
+        "type": "thinking",
+        "thinking": "内部推理",
+        "signature": "sig-1",
+    }]
+
+
+def test_anthropic_prepare_messages_replays_reasoning_blocks_for_tool_rounds():
+    provider = AnthropicProvider(api_key="test", model="test-model", base_url="https://example.test")
+
+    _system_msg, chat_messages = provider._prepare_messages([
+        {
+            "role": "assistant",
+            "content": "我来调用工具",
+            "reasoning_blocks": [{"type": "thinking", "thinking": "内部推理", "signature": "sig-1"}],
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": '{"path": "a.md"}'},
+            }],
+        },
+    ])
+
+    assert chat_messages == [{
+        "role": "assistant",
+        "content": [
+            {"type": "thinking", "thinking": "内部推理", "signature": "sig-1"},
+            {"type": "text", "text": "我来调用工具"},
+            {"type": "tool_use", "id": "call_1", "name": "read_file", "input": {"path": "a.md"}},
+        ],
+    }]
 
 
 def test_anthropic_prepare_messages_combines_system_messages():

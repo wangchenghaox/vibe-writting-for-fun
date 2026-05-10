@@ -21,6 +21,7 @@ class SubAgentManager:
         memory_recorder_factory=None,
         memory_enabled: bool = False,
         blocked_tool_names: set[str] | None = None,
+        max_tool_rounds: int = 20,
     ) -> str:
         """创建子代理"""
         from ..agent.core import AgentCore
@@ -53,6 +54,7 @@ class SubAgentManager:
             tool_context=context,
             memory_recorder=memory_recorder,
             memory_enabled=memory_enabled,
+            max_tool_rounds=max_tool_rounds,
             blocked_tool_names=set(blocked_tool_names or set()) | {"create_sub_agent"},
             can_create_sub_agent=False,
         )

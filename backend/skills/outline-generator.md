@@ -33,6 +33,9 @@ priority: 20
 
 ## 上下文读取
 
+- 正式整理、生成、细化或保存大纲前，先按 progress-summarizer 读取小说根目录的 `progress.md`，确认当前进度、已完成内容和待确认问题。
+- 如果 `progress.md` 不存在，只做轻量目录检查，不要逐个读取所有文件；大纲生成、修改或保存后必须更新进度总结。
+- 主 Agent 委派任务单应写清 `progress.md` 路径；子 Agent 返回结果时说明是否已更新进度总结。
 - 文件路径使用当前 sandbox 相对路径，不要加 `novels/` 前缀。
 - 如用户提到已有小说，优先定位 `{novel_slug}/` 下的 Markdown 文件。
 - 如用户要求续接或细化已有大纲，使用 `search_files` 或 `list_files` 查找 `{novel_slug}/outlines/*.md`，再用 `read_file` 读取。
@@ -48,6 +51,7 @@ priority: 20
 6. 设计完成后，如果任务单要求先出方案，返回简短方向摘要和建议主 Agent 请用户确认的点；不要直接向用户提问。
 7. 如果任务单已明确继续扩写、细化或保存，子 Agent 直接完成。
 8. 如果任务单或用户确认保存，使用 `write_file` 或 `edit_file` 写入 Markdown 文件。
+9. 修改或生成新内容后，更新 `progress.md`，记录大纲状态、影响文件、待确认问题和下一步。
 
 ## 保存规则
 

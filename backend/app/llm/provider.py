@@ -1,6 +1,16 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Iterator
 from pydantic import BaseModel
+
+
+@dataclass(frozen=True)
+class ThinkingConfig:
+    enabled: bool = True
+    effort: str = "medium"
+    budget_tokens: int = 1024
+    keep: Optional[str] = "all"
+    display: Optional[str] = "omitted"
 
 class Message(BaseModel):
     role: str
@@ -12,6 +22,8 @@ class Response(BaseModel):
     content: str
     tool_calls: Optional[List[Dict[str, Any]]] = None
     finish_reason: str
+    reasoning_content: Optional[str] = None
+    reasoning_blocks: Optional[List[Dict[str, Any]]] = None
 
 class StreamEvent(BaseModel):
     type: str
