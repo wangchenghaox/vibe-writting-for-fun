@@ -2,7 +2,7 @@ import os
 import yaml
 from typing import Dict, Any
 from dotenv import load_dotenv
-from .provider import LLMProvider
+from .provider import LLMProvider, ThinkingConfig
 from .openai_provider import OpenAICompatibleProvider
 from .kimi import KimiProvider
 from .anthropic_provider import AnthropicProvider
@@ -29,6 +29,40 @@ def load_config(config_path: str = "config/llm.yaml") -> Dict[str, Any]:
 
     return resolve_env(config)
 
+
+def _as_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _as_int(value: Any, default: int) -> int:
+    if value in (None, ""):
+        return default
+    return int(value)
+
+
+def _thinking_config(config: Dict[str, Any], provider_config: Dict[str, Any]) -> ThinkingConfig:
+    merged = {
+        "enabled": True,
+        "effort": "medium",
+        "budget_tokens": 1024,
+        "keep": "all",
+        "display": "omitted",
+    }
+    merged.update(config.get("llm", {}).get("thinking", {}) or {})
+    merged.update(provider_config.get("thinking", {}) or {})
+
+    return ThinkingConfig(
+        enabled=_as_bool(merged.get("enabled"), default=True),
+        effort=str(merged.get("effort") or "medium"),
+        budget_tokens=_as_int(merged.get("budget_tokens"), 1024),
+        keep=merged.get("keep") or None,
+        display=merged.get("display") or None,
+    )
+
 def create_provider(config_path: str = "config/llm.yaml") -> LLMProvider:
     config = load_config(config_path)
     default = config['llm']['default']
@@ -40,6 +74,7 @@ def create_provider(config_path: str = "config/llm.yaml") -> LLMProvider:
     provider_type = provider_config.get('type', default)
     timeout = float(provider_config.get('timeout', config['llm'].get('timeout', 120.0)))
     max_retries = int(provider_config.get('max_retries', config['llm'].get('max_retries', 2)))
+    thinking_config = _thinking_config(config, provider_config)
 
     api_key = provider_config['api_key']
     if not api_key:
@@ -58,6 +93,7 @@ def create_provider(config_path: str = "config/llm.yaml") -> LLMProvider:
             base_url=base_url,
             timeout=timeout,
             max_retries=max_retries,
+            thinking_config=thinking_config,
         )
     if provider_type in ('openai', 'openai_compatible'):
         return OpenAICompatibleProvider(
@@ -66,6 +102,7 @@ def create_provider(config_path: str = "config/llm.yaml") -> LLMProvider:
             base_url=base_url,
             timeout=timeout,
             max_retries=max_retries,
+            thinking_config=thinking_config,
         )
     if provider_type in ('anthropic', 'claude', 'kimi_coding'):
         return AnthropicProvider(
@@ -74,6 +111,7 @@ def create_provider(config_path: str = "config/llm.yaml") -> LLMProvider:
             base_url=base_url,
             timeout=timeout,
             max_retries=max_retries,
+            thinking_config=thinking_config,
         )
 
     raise ValueError(f"Unknown provider type: {provider_type}")

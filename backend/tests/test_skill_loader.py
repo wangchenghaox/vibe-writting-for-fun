@@ -158,6 +158,7 @@ def test_default_business_skills_are_discoverable():
 
     assert {
         "requirement-confirmer",
+        "progress-summarizer",
         "content-reviewer",
         "chapter-writer",
         "outline-generator",
@@ -210,6 +211,7 @@ def test_default_business_skills_have_refined_operational_sections():
     skills = loader.discover_skills()
 
     for skill_name in (
+        "progress-summarizer",
         "requirement-confirmer",
         "chapter-writer",
         "outline-generator",
@@ -228,28 +230,49 @@ def test_default_business_skills_encode_tool_and_safety_rules():
     loader = SkillLoader()
     skills = loader.discover_skills()
 
+    progress_summarizer = skills["progress-summarizer"]
+    assert progress_summarizer.priority > skills["chapter-writer"].priority
+    assert set(progress_summarizer.allowed_tools) == {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_files",
+        "search_files",
+    }
+    assert "progress.md" in progress_summarizer.content
+    assert "不要逐个读取所有文件" in progress_summarizer.content
+    assert "修改或生成新内容后" in progress_summarizer.content
+
     chapter_writer = skills["chapter-writer"].content
     assert "先输出完整章节正文" in chapter_writer
     assert "不要先调用保存工具" in chapter_writer
     assert "content" in chapter_writer
     assert "不要空保存" in chapter_writer
+    assert "progress.md" in chapter_writer
+    assert "更新进度总结" in chapter_writer
 
     outline_generator = skills["outline-generator"].content
     assert "总纲" in outline_generator
     assert "卷纲" in outline_generator
     assert "章节细纲" in outline_generator
     assert "不要空保存" in outline_generator
+    assert "progress.md" in outline_generator
+    assert "更新进度总结" in outline_generator
 
     character_designer = skills["character-designer"].content
     assert "角色卡" in character_designer
     assert "关系网" in character_designer
     assert "成长弧" in character_designer
     assert "先询问用户确认" in character_designer
+    assert "progress.md" in character_designer
+    assert "更新进度总结" in character_designer
 
     content_reviewer = skills["content-reviewer"].content
     assert "严重程度" in content_reviewer
     assert "位置" in content_reviewer
     assert "不要在未读取章节内容时假装已经审查" in content_reviewer
+    assert "progress.md" in content_reviewer
+    assert "更新进度总结" in content_reviewer
 
     skill_curator = skills["skill-curator"].content
     assert "可复用" in skill_curator

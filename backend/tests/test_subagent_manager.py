@@ -64,6 +64,21 @@ def test_create_subagent_ids_do_not_collide_after_removal():
     assert first_editor_id != second_editor_id
 
 
+def test_create_subagent_uses_configured_max_tool_rounds():
+    mock_provider = Mock()
+    session = Session("test")
+    manager = SubAgentManager()
+
+    agent_id = manager.create_subagent(
+        "writer",
+        mock_provider,
+        session,
+        max_tool_rounds=33,
+    )
+
+    assert manager.subagents[agent_id].max_tool_rounds == 33
+
+
 def test_create_subagent_does_not_attach_recorder_by_default():
     mock_provider = Mock()
     session = Session("parent_session")

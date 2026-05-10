@@ -26,11 +26,11 @@ class Session:
                 }
                 cleaned_tool_calls.append(cleaned_tc)
             msg["tool_calls"] = cleaned_tool_calls
-        else:
-            # 其他 kwargs 直接添加
-            for k, v in kwargs.items():
-                if k != "tool_calls":
-                    msg[k] = v
+
+        # 其他 kwargs 直接添加
+        for k, v in kwargs.items():
+            if k != "tool_calls" and v is not None:
+                msg[k] = v
 
         self.messages.append(msg)
         self.updated_at = datetime.now().isoformat()

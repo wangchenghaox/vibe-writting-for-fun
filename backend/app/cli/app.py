@@ -9,7 +9,7 @@ from ..db.init import init_db
 from ..llm.config import create_provider
 from ..memory.event_recorder import MemoryEventRecorder
 from ..storage.session_store import SessionStore
-from .display import RichDisplay
+from .display import RichDisplay, format_tool_preview
 from .. import tools as _tools  # noqa: F401 - import registers tool decorators
 from ..utils.logging_config import setup_logging
 from .commands import CommandHandler
@@ -53,6 +53,7 @@ class CLI:
             tool_context=dict(session.context),
             memory_recorder=memory_recorder,
             memory_enabled=self.memory_enabled,
+            max_tool_rounds=settings.MAX_TOOL_ROUNDS,
         )
 
         command_handler = CommandHandler(self.display.console, agent, workdir=self.workdir)
@@ -60,13 +61,20 @@ class CLI:
         # 订阅事件显示思考过程
         from ..events.event_types import EventType
 
+        def on_thinking(event):
+            agent_name = event.data.get("agent_name", "agent")
+            content = format_tool_preview(event.data["content"])
+            self.display.console.print(f"[cyan]💭 {agent_name} 思考: {content}[/cyan]\n")
+
         def on_tool_called(event):
-            self.display.console.print(f"[cyan]🔧 调用工具: {event.data['name']}[/cyan]")
-            self.display.console.print(f"[dim]   参数: {event.data['args']}[/dim]")
+            agent_name = event.data.get("agent_name", "agent")
+            self.display.console.print(f"[cyan]🔧 {agent_name} 调用工具: {event.data['name']}[/cyan]")
+            self.display.console.print(f"[dim]   参数: {format_tool_preview(event.data['args'])}[/dim]")
 
         def on_tool_result(event):
-            result = str(event.data['result'])[:150]
-            self.display.console.print(f"[green]   ✓ 结果: {result}...[/green]\n")
+            agent_name = event.data.get("agent_name", "agent")
+            result = format_tool_preview(event.data['result'])
+            self.display.console.print(f"[green]   ✓ {agent_name} 结果: {result}[/green]\n")
 
         def on_context_compressed(event):
             self.display.console.print(f"[yellow]📦 上下文已压缩至 {event.data['count']} 条消息[/yellow]\n")
@@ -75,6 +83,7 @@ class CLI:
         agent.event_bus._subscribers.clear()
 
         subscriptions = (
+            (EventType.THINKING, on_thinking),
             (EventType.TOOL_CALLED, on_tool_called),
             (EventType.TOOL_RESULT, on_tool_result),
             (EventType.CONTEXT_COMPRESSED, on_context_compressed),

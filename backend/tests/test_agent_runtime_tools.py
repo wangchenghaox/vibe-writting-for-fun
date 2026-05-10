@@ -3,9 +3,39 @@ from types import SimpleNamespace
 
 from app.agent.core import AgentCore
 from app.agent.session import Session
-from app.capability.tool_registry import execute_tool
+from app.capability.tool_registry import execute_tool, get_tool_schemas
 from app.llm.provider import Response
 import app.tools as _tools  # noqa: F401
+
+
+def test_bash_schema_explains_permissions_and_forbidden_operations():
+    schema = next(
+        item for item in get_tool_schemas(allowed_names=["bash"])
+        if item["function"]["name"] == "bash"
+    )
+
+    description = schema["function"]["description"]
+    command_description = schema["function"]["parameters"]["properties"]["command"]["description"]
+    combined = f"{description}\n{command_description}"
+
+    for required_text in (
+        "只能",
+        "当前工作区",
+        "只读",
+        "测试",
+        "禁止",
+        "创建",
+        "删除",
+        "移动",
+        "修改文件",
+        "网络",
+        "权限",
+        "后台",
+        "重定向",
+        "write_file",
+        "edit_file",
+    ):
+        assert required_text in combined
 
 
 def test_bash_runs_simple_command_inside_workdir(tmp_path):
@@ -40,17 +70,44 @@ def test_bash_rejects_destructive_or_outside_commands(tmp_path):
     ).startswith("操作被拒绝")
 
 
-def test_bash_allows_mkdir_inside_workdir(tmp_path):
+def test_bash_rejects_mkdir_inside_workdir_because_runtime_is_read_only(tmp_path):
     result = execute_tool(
         "bash",
         {"command": "mkdir -p drafts/chapter_01"},
         context={"workdir": str(tmp_path)},
     )
 
-    payload = json.loads(result)
-    assert payload["exit_code"] == 0
-    assert payload["stdout"] == ""
-    assert (tmp_path / "drafts" / "chapter_01").is_dir()
+    assert result.startswith("操作被拒绝")
+    assert not (tmp_path / "drafts" / "chapter_01").exists()
+
+
+def test_bash_rejects_mutating_or_ambiguous_read_commands(tmp_path):
+    note = tmp_path / "notes.txt"
+    note.write_text("beta\nalpha\n", encoding="utf-8")
+
+    commands = [
+        "find . -delete",
+        "sort notes.txt -o sorted.txt",
+        "sort --output sorted_long.txt notes.txt",
+        "git branch -D old_branch",
+        "git branch new_branch",
+        "git diff --output=diff.txt",
+        "sed -n 1p notes.txt",
+    ]
+
+    for command in commands:
+        result = execute_tool(
+            "bash",
+            {"command": command},
+            context={"workdir": str(tmp_path)},
+        )
+
+        assert result.startswith("操作被拒绝"), command
+
+    assert note.exists()
+    assert not (tmp_path / "sorted.txt").exists()
+    assert not (tmp_path / "sorted_long.txt").exists()
+    assert not (tmp_path / "diff.txt").exists()
 
 
 def test_bash_rejects_mkdir_outside_workdir(tmp_path):
@@ -79,6 +136,58 @@ def test_bash_allows_simple_pipeline_inside_workdir(tmp_path):
     assert payload["exit_code"] == 0
     assert payload["stdout"] == "beta"
     assert payload["stderr"] == ""
+
+
+def test_bash_allows_and_chained_commands_inside_workdir(tmp_path):
+    (tmp_path / "notes.txt").write_text("alpha\n", encoding="utf-8")
+
+    result = execute_tool(
+        "bash",
+        {"command": "pwd && ls -la"},
+        context={"workdir": str(tmp_path)},
+    )
+
+    payload = json.loads(result)
+    assert payload["exit_code"] == 0
+    assert str(tmp_path) in payload["stdout"]
+    assert "notes.txt" in payload["stdout"]
+    assert payload["stderr"] == ""
+
+
+def test_bash_allows_devnull_redirect_and_or_fallback_inside_workdir(tmp_path):
+    (tmp_path / "novels").mkdir()
+    (tmp_path / "novels" / "chapter.txt").write_text("alpha\n", encoding="utf-8")
+    (tmp_path / ".agent").mkdir()
+    (tmp_path / ".agent" / "todo_list.json").write_text("{}", encoding="utf-8")
+
+    result = execute_tool(
+        "bash",
+        {
+            "command": (
+                'ls -la novels && echo "---" && ls -la .agent && '
+                'echo "---" && ls -la skills 2>/dev/null || echo "No skills directory"'
+            )
+        },
+        context={"workdir": str(tmp_path)},
+    )
+
+    payload = json.loads(result)
+    assert payload["exit_code"] == 0
+    assert "chapter.txt" in payload["stdout"]
+    assert "todo_list.json" in payload["stdout"]
+    assert "No skills directory" in payload["stdout"]
+    assert payload["stderr"] == ""
+
+
+def test_bash_rejects_redirect_to_workspace_file(tmp_path):
+    result = execute_tool(
+        "bash",
+        {"command": "ls > listing.txt"},
+        context={"workdir": str(tmp_path)},
+    )
+
+    assert result.startswith("操作被拒绝")
+    assert not (tmp_path / "listing.txt").exists()
 
 
 def test_bash_rejects_blocked_command_inside_pipeline(tmp_path):
@@ -170,6 +279,7 @@ def test_create_sub_agent_inherits_main_context_and_hides_subagent_tool(tmp_path
             "agent_name": "main",
             "agent_instance_id": "main-session",
         },
+        max_tool_rounds=33,
     )
 
     assert agent.chat("创建一个写作子 Agent") == "主 Agent 完成"
@@ -180,6 +290,7 @@ def test_create_sub_agent_inherits_main_context_and_hides_subagent_tool(tmp_path
     assert subagent.tool_context["novel_id"] == "novel_ctx"
     assert subagent.tool_context["workdir"] == str(tmp_path)
     assert subagent.tool_context["agent_name"] == "writer"
+    assert subagent.max_tool_rounds == 33
     assert "create_sub_agent" in provider.tool_names_by_call[0]
     assert "create_sub_agent" not in provider.tool_names_by_call[1]
     assert "write_file" in provider.tool_names_by_call[1]

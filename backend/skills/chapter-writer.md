@@ -33,6 +33,9 @@ priority: 25
 
 ## 上下文读取
 
+- 正式写作、续写、改写或保存章节前，先按 progress-summarizer 读取小说根目录的 `progress.md`，确认当前进度、最近变更和下一步。
+- 如果 `progress.md` 不存在，只做轻量目录检查，不要逐个读取所有文件；章节生成、修改或保存后必须更新进度总结。
+- 主 Agent 委派任务单应写清 `progress.md` 路径；子 Agent 返回结果时说明是否已更新进度总结。
 - 文件路径使用当前 sandbox 相对路径，不要加 `novels/` 前缀。
 - 如用户指定大纲，使用 `search_files` 或 `list_files` 查找 `{novel_slug}/outlines/*.md`，再用 `read_file` 读取。
 - 如需要承接前文，先用 `list_files` 查看 `{novel_slug}/chapters/*.md`，再用 `read_file` 读取相邻章节。
@@ -46,6 +49,7 @@ priority: 25
 4. 子 Agent 生成、创作、续写或改写章节时，必须先输出完整章节正文，不要先调用保存工具。
 5. 正文完成后自查一次：人物行动是否有因果，场景是否推进，结尾是否留下下一步行动。
 6. 只有任务单或用户明确要求保存时，才调用 `write_file` 或 `edit_file` 写入 Markdown 文件。
+7. 修改或生成新内容后，更新 `progress.md`，记录章节状态、影响文件、待确认问题和下一步。
 
 ## 保存规则
 

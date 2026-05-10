@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional, Iterator
 import json
 import anthropic
-from .provider import LLMProvider, Response, StreamEvent
+from .provider import LLMProvider, Response, StreamEvent, ThinkingConfig
 
 class AnthropicProvider(LLMProvider):
     def __init__(
@@ -11,9 +11,11 @@ class AnthropicProvider(LLMProvider):
         base_url: str,
         timeout: float = 120.0,
         max_retries: int = 2,
+        thinking_config: Optional[ThinkingConfig] = None,
     ):
         self.timeout = float(timeout)
         self.max_retries = int(max_retries)
+        self.thinking_config = thinking_config or ThinkingConfig()
         self.client = anthropic.Anthropic(
             api_key=api_key,
             base_url=base_url,
@@ -39,12 +41,13 @@ class AnthropicProvider(LLMProvider):
                         "content": msg["content"]
                     }]
                 })
-            elif msg["role"] == "assistant" and msg.get("tool_calls"):
+            elif msg["role"] == "assistant" and (msg.get("tool_calls") or msg.get("reasoning_blocks")):
                 # 转换 assistant 的 tool_calls
                 content = []
+                content.extend(msg.get("reasoning_blocks") or [])
                 if msg.get("content"):
                     content.append({"type": "text", "text": msg["content"]})
-                for tc in msg["tool_calls"]:
+                for tc in msg.get("tool_calls") or []:
                     content.append({
                         "type": "tool_use",
                         "id": tc["id"],
@@ -61,6 +64,7 @@ class AnthropicProvider(LLMProvider):
     def _response_from_message(self, response) -> Response:
         content = ""
         tool_calls = None
+        reasoning_blocks = None
 
         if response.content:
             for block in response.content:
@@ -77,17 +81,43 @@ class AnthropicProvider(LLMProvider):
                             "arguments": json.dumps(block.input)
                         }
                     })
+                elif block.type in ("thinking", "redacted_thinking"):
+                    if reasoning_blocks is None:
+                        reasoning_blocks = []
+                    dump = getattr(block, "model_dump", None)
+                    if dump is not None:
+                        reasoning_blocks.append(dump(exclude_none=True))
+                    else:
+                        reasoning_blocks.append(dict(block))
 
         return Response(
             content=content,
             tool_calls=tool_calls,
-            finish_reason=response.stop_reason
+            finish_reason=response.stop_reason,
+            reasoning_blocks=reasoning_blocks,
         )
+
+    def _thinking_payload(self) -> dict:
+        if not self.thinking_config.enabled:
+            return {"type": "disabled"}
+
+        payload = {
+            "type": "enabled",
+            "budget_tokens": self.thinking_config.budget_tokens,
+        }
+        if self.thinking_config.display:
+            payload["display"] = self.thinking_config.display
+        return payload
 
     def chat(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Response:
         system_msg, chat_messages = self._prepare_messages(messages)
 
-        kwargs = {"model": self.model, "messages": chat_messages, "max_tokens": 4096}
+        kwargs = {
+            "model": self.model,
+            "messages": chat_messages,
+            "max_tokens": 4096,
+            "thinking": self._thinking_payload(),
+        }
         if system_msg:
             kwargs["system"] = system_msg
         if tools:
@@ -110,7 +140,12 @@ class AnthropicProvider(LLMProvider):
     def chat_stream_response(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Iterator[StreamEvent]:
         system_msg, chat_messages = self._prepare_messages(messages)
 
-        kwargs = {"model": self.model, "messages": chat_messages, "max_tokens": 4096}
+        kwargs = {
+            "model": self.model,
+            "messages": chat_messages,
+            "max_tokens": 4096,
+            "thinking": self._thinking_payload(),
+        }
         if system_msg:
             kwargs["system"] = system_msg
         if tools:

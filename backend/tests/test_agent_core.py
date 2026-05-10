@@ -7,6 +7,7 @@ from app.agent.session import Session
 from app.capability.skill_loader import SkillLoader
 from app.capability.tool_registry import tool
 from app.events.event_types import EventType
+from app.llm.provider import Response
 from uuid import uuid4
 
 
@@ -28,6 +29,7 @@ class TestAgentCore:
         agent = AgentCore(mock_provider, session)
         assert agent.provider == mock_provider
         assert agent.session == session
+        assert agent.max_tool_rounds == 20
 
     def test_chat_simple_response(self, mock_provider, session):
         agent = AgentCore(mock_provider, session)
@@ -63,6 +65,9 @@ priority: 5
         assert "核心职责是和用户一起完成小说创作、规划、审稿、资料整理和文件落盘工作" in system_messages[0]
         assert "默认使用中文回复" in system_messages[0]
         assert "不要假装已经读取文件" in system_messages[0]
+        assert "正式开始写作、整理、改写、审稿或保存前" in system_messages[0]
+        assert "progress.md" in system_messages[0]
+        assert "修改或生成新内容后" in system_messages[0]
         assert "技能: chapter-writer" in system_messages[1]
         assert all(
             "中文长篇小说创作 CLI Agent" not in msg["content"]
@@ -777,3 +782,76 @@ priority: 5
         ]
         assert recorder.records[1][1]["name"] == tool_name
         assert recorder.records[2][1]["result"] == "tool result"
+
+    def test_agent_preserves_reasoning_metadata_across_tool_round(self, session):
+        tool_name = f"reasoning_probe_{uuid4().hex}"
+
+        @tool(name=tool_name, description="Probe")
+        def reasoning_probe() -> str:
+            return "tool result"
+
+        provider = Mock()
+        provider.chat.side_effect = [
+            Response(
+                content="",
+                reasoning_content="模型推理",
+                reasoning_blocks=[{"type": "thinking", "thinking": "内部推理", "signature": "sig-1"}],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": tool_name, "arguments": "{}"},
+                    }
+                ],
+                finish_reason="tool_calls",
+            ),
+            Response(content="done", tool_calls=None, finish_reason="stop"),
+        ]
+        agent = AgentCore(provider, session)
+
+        assert agent.chat("run") == "done"
+
+        assistant_tool_messages = [
+            msg for msg in session.messages
+            if msg["role"] == "assistant" and msg.get("tool_calls")
+        ]
+        assert assistant_tool_messages[0]["reasoning_content"] == "模型推理"
+        assert assistant_tool_messages[0]["reasoning_blocks"] == [
+            {"type": "thinking", "thinking": "内部推理", "signature": "sig-1"}
+        ]
+
+    def test_agent_tool_and_thinking_events_include_agent_name(self, session):
+        tool_name = f"agent_event_probe_{uuid4().hex}"
+
+        @tool(name=tool_name, description="Probe")
+        def agent_event_probe() -> str:
+            return "tool result"
+
+        provider = Mock()
+        provider.chat.side_effect = [
+            Response(
+                content="我需要先调用工具查看信息。" + "甲" * 200,
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": tool_name, "arguments": "{}"},
+                    }
+                ],
+                finish_reason="tool_calls",
+            ),
+            Response(content="done", tool_calls=None, finish_reason="stop"),
+        ]
+        agent = AgentCore(provider, session, tool_context={"agent_name": "writer"})
+        thinking_events = []
+        tool_called_events = []
+        tool_result_events = []
+        agent.event_bus.subscribe(EventType.THINKING, thinking_events.append)
+        agent.event_bus.subscribe(EventType.TOOL_CALLED, tool_called_events.append)
+        agent.event_bus.subscribe(EventType.TOOL_RESULT, tool_result_events.append)
+
+        assert agent.chat("run") == "done"
+
+        assert thinking_events[0].data["agent_name"] == "writer"
+        assert tool_called_events[0].data["agent_name"] == "writer"
+        assert tool_result_events[0].data["agent_name"] == "writer"

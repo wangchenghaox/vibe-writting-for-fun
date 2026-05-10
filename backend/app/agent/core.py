@@ -71,6 +71,12 @@ BASE_SYSTEM_PROMPT = """你是一个中文长篇小说创作 CLI Agent，运行�
 - 文件内容应优先使用 Markdown；写入文件时必须提供完整正文，不要只写摘要、说明或占位内容。
 - 如果工具调用失败，清楚说明失败原因，并给出下一步可行方案。
 
+进度总结：
+- 正式开始写作、整理、改写、审稿或保存前，先查看当前小说根目录或任务单指定小说目录下的 `progress.md`，用它判断当前进度、最近变更、待确认问题和下一步。
+- 如果 `progress.md` 不存在，只做轻量目录检查或读取必要入口文件，不要逐个读取所有文件；随后创建初始进度总结。
+- 修改或生成新内容后，必须同步更新 `progress.md`，记录本次变更、影响的文件、待确认问题和建议下一步。
+- 进度总结只记录可复用的项目状态和工作推进，不保存无关闲聊或敏感信息。
+
 技能使用：
 - 系统会提供可用 skill 的名称、说明、触发时机和说明文件路径。
 - 当用户请求符合某个 skill 的触发时机时，你应主动参考该 skill；如果需要完整流程、格式或安全规则，可以读取对应的 skills/*.md 说明文件。
@@ -125,7 +131,7 @@ class AgentCore:
         skill_loader: Optional[SkillLoader] = None,
         memory_recorder=None,
         memory_enabled: bool = False,
-        max_tool_rounds: int = 8,
+        max_tool_rounds: int = 20,
         blocked_tool_names: Optional[set[str]] = None,
         can_create_sub_agent: bool = True,
     ):
@@ -206,8 +212,12 @@ class AgentCore:
             "tool_context": dict(self.tool_context),
             "memory_enabled": self.memory_enabled,
             "can_create_sub_agent": self.can_create_sub_agent,
+            "max_tool_rounds": self.max_tool_rounds,
         })
         return context
+
+    def _agent_name(self) -> str:
+        return self.tool_context.get("agent_name") or "agent"
 
     def _has_memory_context(self):
         return all(
@@ -381,8 +391,21 @@ class AgentCore:
         self._finish_assistant_message(recovery_message)
         return ToolHandlingOutcome(self.session.get_messages(), recovery_message=recovery_message)
 
-    def _finish_assistant_message(self, content: str):
-        self.session.add_message("assistant", content)
+    def _assistant_message_metadata(self, response: Optional[Response]) -> dict:
+        if response is None:
+            return {}
+
+        metadata = {}
+        reasoning_content = getattr(response, "reasoning_content", None)
+        reasoning_blocks = getattr(response, "reasoning_blocks", None)
+        if reasoning_content:
+            metadata["reasoning_content"] = reasoning_content
+        if reasoning_blocks:
+            metadata["reasoning_blocks"] = reasoning_blocks
+        return metadata
+
+    def _finish_assistant_message(self, content: str, response: Optional[Response] = None):
+        self.session.add_message("assistant", content, **self._assistant_message_metadata(response))
         self.event_bus.publish(Event(EventType.MESSAGE_SENT, {"content": content}, self.session.id))
         self._record_memory_event("assistant_message", {"content": content})
 
@@ -400,10 +423,19 @@ class AgentCore:
     def _handle_tool_calls(self, response: Response):
         # 显示模型的思考内容
         if response.content:
-            self.event_bus.publish(Event(EventType.THINKING, {"content": response.content}, self.session.id))
+            self.event_bus.publish(Event(
+                EventType.THINKING,
+                {"agent_name": self._agent_name(), "content": response.content},
+                self.session.id,
+            ))
 
         logger.debug(f"Tool calls: {response.tool_calls}")
-        self.session.add_message("assistant", response.content or "", tool_calls=response.tool_calls)
+        self.session.add_message(
+            "assistant",
+            response.content or "",
+            tool_calls=response.tool_calls,
+            **self._assistant_message_metadata(response),
+        )
 
         for idx, tc in enumerate(response.tool_calls or []):
             tool_name = tc["function"]["name"]
@@ -428,7 +460,11 @@ class AgentCore:
                         tool_args["content"] = draft_content
                         self._replace_stored_tool_call_arguments(idx, tool_args)
 
-                    self.event_bus.publish(Event(EventType.TOOL_CALLED, {"name": tool_name, "args": tool_args}, self.session.id))
+                    self.event_bus.publish(Event(
+                        EventType.TOOL_CALLED,
+                        {"agent_name": self._agent_name(), "name": tool_name, "args": tool_args},
+                        self.session.id,
+                    ))
                     self._record_memory_event("tool_call", {"name": tool_name, "args": tool_args})
 
                     try:
@@ -440,7 +476,11 @@ class AgentCore:
             result_text = str(result)
             repeated_missing_arg_error = self._is_repeated_missing_argument_error(tool_name, result_text)
 
-            self.event_bus.publish(Event(EventType.TOOL_RESULT, {"name": tool_name, "result": result}, self.session.id))
+            self.event_bus.publish(Event(
+                EventType.TOOL_RESULT,
+                {"agent_name": self._agent_name(), "name": tool_name, "result": result},
+                self.session.id,
+            ))
             self._record_memory_event("tool_result", {"name": tool_name, "result": str(result)})
 
             self.session.add_message("tool", result_text, tool_call_id=tool_call_id, name=tool_name)
@@ -479,7 +519,7 @@ class AgentCore:
                 if self._main_agent_should_retry_as_delegation(user_message, response):
                     messages = self._append_main_agent_delegation_retry_prompt(messages)
                     continue
-                self._finish_assistant_message(response.content)
+                self._finish_assistant_message(response.content, response=response)
                 return response.content
 
         message = f"Exceeded maximum tool rounds: {self.max_tool_rounds}"
@@ -539,7 +579,7 @@ class AgentCore:
                             Event(EventType.MESSAGE_DELTA, {"content": part}, self.session.id)
                         )
                         yield part
-                self._finish_assistant_message(response.content)
+                self._finish_assistant_message(response.content, response=response)
                 return
 
         message = f"Exceeded maximum tool rounds: {self.max_tool_rounds}"

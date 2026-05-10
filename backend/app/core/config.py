@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "sqlite:///./data/agent_memory.db"
     MEMORY_ENABLED: bool = False
+    MAX_TOOL_ROUNDS: int = 20
     KIMI_API_KEY: str = ""
     DATA_DIR: Path = BACKEND_DIR / "data"
     WORKDIR: Optional[Path] = None

@@ -3,15 +3,24 @@ import logging
 
 from openai import OpenAI
 
-from .provider import LLMProvider, Response, StreamEvent
+from .provider import LLMProvider, Response, StreamEvent, ThinkingConfig
 
 logger = logging.getLogger(__name__)
 
 
 class OpenAICompatibleProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str, base_url: str, timeout: float = 120.0, max_retries: int = 2):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str,
+        timeout: float = 120.0,
+        max_retries: int = 2,
+        thinking_config: Optional[ThinkingConfig] = None,
+    ):
         self.timeout = float(timeout)
         self.max_retries = int(max_retries)
+        self.thinking_config = thinking_config or ThinkingConfig()
         self.client = OpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -20,14 +29,44 @@ class OpenAICompatibleProvider(LLMProvider):
         )
         self.model = model
 
+    def _prepare_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        prepared = []
+        for msg in messages:
+            cleaned = {
+                key: value for key, value in msg.items()
+                if key not in {"reasoning_content", "reasoning_blocks"}
+            }
+            prepared.append(cleaned)
+        return prepared
+
+    def _apply_thinking_options(self, kwargs: Dict[str, Any]):
+        kwargs["reasoning_effort"] = (
+            self.thinking_config.effort if self.thinking_config.enabled else "none"
+        )
+
+    def _request_kwargs(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        stream: bool = False,
+    ) -> Dict[str, Any]:
+        kwargs = {"model": self.model, "messages": self._prepare_messages(messages)}
+        if stream:
+            kwargs["stream"] = True
+        if tools:
+            kwargs["tools"] = tools
+        self._apply_thinking_options(kwargs)
+        return kwargs
+
+    def _extract_reasoning_content(self, message) -> Optional[str]:
+        return getattr(message, "reasoning_content", None)
+
     def chat(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Response:
-        kwargs = {"model": self.model, "messages": messages}
-        if tools:
-            kwargs["tools"] = tools
+        kwargs = self._request_kwargs(messages, tools)
 
         logger.debug("Sending %s messages to OpenAI-compatible API", len(messages))
         completion = self.client.chat.completions.create(**kwargs)
@@ -47,6 +86,7 @@ class OpenAICompatibleProvider(LLMProvider):
             content=msg.content or "",
             tool_calls=tool_calls,
             finish_reason=completion.choices[0].finish_reason,
+            reasoning_content=self._extract_reasoning_content(msg),
         )
 
     def chat_stream(
@@ -63,11 +103,10 @@ class OpenAICompatibleProvider(LLMProvider):
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Iterator[StreamEvent]:
-        kwargs = {"model": self.model, "messages": messages, "stream": True}
-        if tools:
-            kwargs["tools"] = tools
+        kwargs = self._request_kwargs(messages, tools, stream=True)
 
         content_parts = []
+        reasoning_parts = []
         tool_calls: Dict[int, Dict[str, Any]] = {}
         finish_reason = "stop"
 
@@ -81,6 +120,10 @@ class OpenAICompatibleProvider(LLMProvider):
             if content:
                 content_parts.append(content)
                 yield StreamEvent(type="content_delta", content=content)
+
+            reasoning_content = self._extract_reasoning_content(delta)
+            if reasoning_content:
+                reasoning_parts.append(reasoning_content)
 
             for tool_delta in getattr(delta, "tool_calls", None) or []:
                 index = getattr(tool_delta, "index", None)
@@ -127,5 +170,6 @@ class OpenAICompatibleProvider(LLMProvider):
                 content="".join(content_parts),
                 tool_calls=normalized_tool_calls or None,
                 finish_reason=finish_reason,
+                reasoning_content="".join(reasoning_parts) or None,
             ),
         )
