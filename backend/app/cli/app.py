@@ -55,6 +55,7 @@ class CLI:
             memory_enabled=self.memory_enabled,
             max_tool_rounds=settings.MAX_TOOL_ROUNDS,
             sub_agent_timeout=settings.SUB_AGENT_TIMEOUT,
+            skills_enabled=settings.SKILLS_ENABLED,
         )
 
         command_handler = CommandHandler(self.display.console, agent, workdir=self.workdir)
