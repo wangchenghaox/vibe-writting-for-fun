@@ -8,6 +8,8 @@ import logging
 
 import yaml
 
+from app.core.skill_paths import configured_skill_roots, display_skill_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,10 +25,14 @@ class SkillDefinition:
 
 
 class SkillLoader:
-    def __init__(self, skills_dir: str | Path = None):
-        if skills_dir is None:
-            skills_dir = Path(__file__).resolve().parents[2] / "skills"
-        self.skills_dir = Path(skills_dir)
+    def __init__(self, skills_dir: str | Path = None, skills_dirs: List[str | Path] = None):
+        if skills_dirs is not None:
+            self.skills_dirs = [Path(path).expanduser().resolve(strict=False) for path in skills_dirs]
+        elif skills_dir is not None:
+            self.skills_dirs = [Path(skills_dir).expanduser().resolve(strict=False)]
+        else:
+            self.skills_dirs = configured_skill_roots()
+        self.skills_dir = self.skills_dirs[0] if self.skills_dirs else Path("skills")
         self.loaded_skills: Dict[str, str] = {}
         self._skill_cache: Optional[Dict[str, SkillDefinition]] = None
 
@@ -58,17 +64,16 @@ class SkillLoader:
             return self._skill_cache
 
         skills: Dict[str, SkillDefinition] = {}
-        if not self.skills_dir.exists():
-            self._skill_cache = skills
-            return skills
-
-        for skill_path in sorted(self.skills_dir.glob("*.md")):
-            try:
-                skill = self._parse_skill_file(skill_path)
-            except Exception as e:
-                logger.error(f"解析技能失败 {skill_path}: {e}")
+        for skills_dir in self.skills_dirs:
+            if not skills_dir.exists():
                 continue
-            skills[skill.name] = skill
+            for skill_path in sorted(skills_dir.glob("*.md")):
+                try:
+                    skill = self._parse_skill_file(skill_path)
+                except Exception as e:
+                    logger.error(f"解析技能失败 {skill_path}: {e}")
+                    continue
+                skills.setdefault(skill.name, skill)
 
         self._skill_cache = skills
         return skills
@@ -129,12 +134,11 @@ class SkillLoader:
         if skill.path is None:
             return f"skills/{skill.name}.md"
 
-        try:
-            relative_path = skill.path.relative_to(self.skills_dir)
-        except ValueError:
-            relative_path = Path(skill.path.name)
+        display_path = display_skill_path(skill.path, self.skills_dirs)
+        if display_path is not None:
+            return display_path
 
-        return str(Path("skills") / relative_path).replace("\\", "/")
+        return str(Path("skills") / skill.path.name).replace("\\", "/")
 
     def _as_list(self, value) -> List[str]:
         if value is None:

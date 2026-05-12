@@ -1,10 +1,17 @@
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Optional
 
 from app.capability.tool_registry import tool
 from app.core.config import settings
+from app.core.skill_paths import (
+    configured_skill_roots,
+    display_skill_path,
+    is_skill_alias_path,
+    skill_alias_candidates,
+)
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -22,28 +29,26 @@ def _workdir_root() -> Optional[Path]:
     return Path(workdir).expanduser().resolve(strict=False)
 
 
-def _allowed_roots() -> list[Path]:
+def _workspace_roots() -> list[Path]:
     workdir = _workdir_root()
     if workdir is not None:
         return [workdir]
 
-    return [
-        (Path(settings.DATA_DIR) / "novels").resolve(),
-        _skills_root().resolve(),
-    ]
+    return [(Path(settings.DATA_DIR) / "novels").resolve()]
 
 
-def _skill_alias_candidate(raw: Path) -> Optional[Path]:
-    if raw.is_absolute():
-        return None
-    if not raw.parts or raw.parts[0] != "skills":
-        return None
-    return BACKEND_ROOT / raw
+def _read_roots(include_skills: bool = True) -> list[Path]:
+    roots = _workspace_roots()
+    if include_skills:
+        roots.extend(configured_skill_roots())
+    return roots
 
 
-def _path_candidates(path: str) -> list[Path]:
+def _path_candidates(path: str, include_skills: bool = False) -> list[Path]:
     raw = Path(path)
     workdir = _workdir_root()
+    if include_skills and is_skill_alias_path(raw):
+        return skill_alias_candidates(raw)
     if workdir is not None:
         if raw.is_absolute():
             return [raw]
@@ -55,36 +60,61 @@ def _path_candidates(path: str) -> list[Path]:
     candidates = []
     if raw.parts and raw.parts[0] == "novels":
         candidates.append(Path(settings.DATA_DIR) / raw)
-    if raw.parts and raw.parts[0] == "skills":
-        candidates.append(BACKEND_ROOT / raw)
+    if include_skills and raw.parts and raw.parts[0] == "skills":
+        candidates.extend(skill_alias_candidates(raw))
 
     candidates.extend([REPO_ROOT / raw, BACKEND_ROOT / raw])
     return candidates
 
 
-def _resolve_safe_path(path: str, allow_skill_alias: bool = False) -> tuple[Optional[Path], Optional[str]]:
-    if allow_skill_alias:
-        raw = Path(path)
-        candidate = _skill_alias_candidate(raw)
-        if candidate is not None:
-            resolved = candidate.resolve(strict=False)
-            if resolved.is_relative_to(_skills_root().resolve()):
+def _resolve_safe_path(
+    path: str,
+    allow_skill_alias: bool = False,
+    include_skills: bool = False,
+    prefer_existing: bool = False,
+) -> tuple[Optional[Path], Optional[str]]:
+    if not (allow_skill_alias or include_skills) and is_skill_alias_path(path):
+        return None, "操作被拒绝: skill 目录为只读，请改用工作区内的其他路径"
+
+    roots = _read_roots(include_skills=include_skills or allow_skill_alias)
+    allowed = []
+    for candidate in _path_candidates(path, include_skills=include_skills or allow_skill_alias):
+        resolved = candidate.resolve(strict=False)
+        if any(resolved.is_relative_to(root.resolve(strict=False)) for root in roots):
+            allowed.append(resolved)
+            if not prefer_existing or resolved.exists():
                 return resolved, None
 
-    for candidate in _path_candidates(path):
-        resolved = candidate.resolve(strict=False)
-        if any(resolved.is_relative_to(root) for root in _allowed_roots()):
-            return resolved, None
+    if allowed:
+        return allowed[0], None
 
-    roots = ", ".join(str(root) for root in _allowed_roots())
-    return None, f"操作被拒绝: 路径必须位于允许目录内 ({roots})"
+    roots_display = ", ".join(str(root) for root in roots)
+    return None, f"操作被拒绝: 路径必须位于允许目录内 ({roots_display})"
+
+
+def _resolve_read_bases(path: str) -> tuple[Optional[list[Path]], Optional[str]]:
+    if not path:
+        return _workspace_roots(), None
+
+    raw = Path(path)
+    if is_skill_alias_path(raw) and len(raw.parts) == 1:
+        return configured_skill_roots(), None
+
+    base, error = _resolve_safe_path(
+        path,
+        allow_skill_alias=True,
+        include_skills=True,
+        prefer_existing=True,
+    )
+    if error:
+        return None, error
+    return [base], None
 
 
 def _display_path(path: Path) -> str:
-    try:
-        return str(Path("skills") / path.resolve(strict=False).relative_to(_skills_root().resolve()))
-    except ValueError:
-        pass
+    skill_path = display_skill_path(path)
+    if skill_path is not None:
+        return skill_path
 
     workdir = _workdir_root()
     if workdir is not None:
@@ -110,7 +140,12 @@ def _json(data) -> str:
 
 @tool(name="read_file", description="Read a text file from allowed novel or skill directories")
 def read_file(path: str, max_chars: int = 20000, offset: int = 0) -> str:
-    resolved, error = _resolve_safe_path(path, allow_skill_alias=True)
+    resolved, error = _resolve_safe_path(
+        path,
+        allow_skill_alias=True,
+        include_skills=True,
+        prefer_existing=True,
+    )
     if error:
         return error
     if not resolved.exists():
@@ -129,12 +164,12 @@ def read_file(path: str, max_chars: int = 20000, offset: int = 0) -> str:
 @tool(
     name="write_file",
     description=(
-        "Write a text file within allowed novel or skill directories. Use this only when the exact full file "
+        "Write a text file within the current workspace. Skill directories are read-only. Use this only when the exact full file "
         "content is already available in the conversation or has just been generated. Requires both path and "
         "complete content; 不要在没有完整内容时调用，不要用 write_file 仅声明保存意图。"
     ),
     parameter_descriptions={
-        "path": "Target file path under an allowed novel or skill directory.",
+        "path": "Target file path under the current workspace.",
         "content": "完整文件正文。必填，不能省略；必须传入要写入文件的完整 Markdown 文本，不要只传路径，也不要用空字符串占位。",
         "overwrite": "Whether to overwrite an existing file. Defaults to true.",
     },
@@ -151,7 +186,46 @@ def write_file(path: str, content: str, overwrite: bool = True) -> str:
     return f"已写入文件: {_display_path(resolved)}"
 
 
-@tool(name="edit_file", description="Replace text in a file within allowed novel or skill directories")
+@tool(name="make_directory", description="Create a directory within the current workspace. Skill directories are read-only.")
+def make_directory(path: str) -> str:
+    resolved, error = _resolve_safe_path(path)
+    if error:
+        return error
+    if resolved.exists() and not resolved.is_dir():
+        return f"路径已存在且不是目录: {_display_path(resolved)}"
+
+    resolved.mkdir(parents=True, exist_ok=True)
+    return f"已创建目录: {_display_path(resolved)}"
+
+
+@tool(name="copy_file", description="Copy a file into the current workspace. Source may be workspace or read-only skill files.")
+def copy_file(source_path: str, target_path: str, overwrite: bool = False) -> str:
+    source, source_error = _resolve_safe_path(
+        source_path,
+        allow_skill_alias=True,
+        include_skills=True,
+        prefer_existing=True,
+    )
+    if source_error:
+        return source_error
+    target, target_error = _resolve_safe_path(target_path)
+    if target_error:
+        return target_error
+    if not source.exists():
+        return f"文件不存在: {_display_path(source)}"
+    if not source.is_file():
+        return f"不是文件: {_display_path(source)}"
+    if target.exists() and not target.is_file():
+        return f"目标路径不是文件: {_display_path(target)}"
+    if target.exists() and not overwrite:
+        return f"目标文件已存在: {_display_path(target)}"
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, target)
+    return f"已复制文件: {_display_path(source)} -> {_display_path(target)}"
+
+
+@tool(name="edit_file", description="Replace text in a file within the current workspace. Skill directories are read-only.")
 def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
     resolved, error = _resolve_safe_path(path)
     if error:
@@ -171,7 +245,7 @@ def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False
     return f"已修改文件: {_display_path(resolved)}"
 
 
-@tool(name="delete_file", description="Delete a file from allowed novel or skill directories")
+@tool(name="delete_file", description="Delete a file from the current workspace. Skill directories are read-only.")
 def delete_file(path: str) -> str:
     resolved, error = _resolve_safe_path(path)
     if error:
@@ -185,7 +259,7 @@ def delete_file(path: str) -> str:
     return f"已删除文件: {_display_path(resolved)}"
 
 
-@tool(name="rename_file", description="Rename or move a file within allowed novel or skill directories")
+@tool(name="rename_file", description="Rename or move a file within the current workspace. Skill directories are read-only.")
 def rename_file(source_path: str, target_path: str, overwrite: bool = False) -> str:
     source, source_error = _resolve_safe_path(source_path)
     if source_error:
@@ -207,13 +281,9 @@ def rename_file(source_path: str, target_path: str, overwrite: bool = False) -> 
 
 @tool(name="list_files", description="List files under allowed novel or skill directories")
 def list_files(path: str = "", pattern: str = "*", max_results: int = 100) -> str:
-    if path:
-        base, error = _resolve_safe_path(path, allow_skill_alias=True)
-        if error:
-            return error
-        bases = [base]
-    else:
-        bases = _allowed_roots()
+    bases, error = _resolve_read_bases(path)
+    if error:
+        return error
 
     files = []
     for base in bases:
@@ -237,13 +307,9 @@ def grep_files(pattern: str, path: str = "", file_glob: str = "*", max_results: 
     except re.error as e:
         return f"无效正则: {e}"
 
-    if path:
-        base, error = _resolve_safe_path(path, allow_skill_alias=True)
-        if error:
-            return error
-        bases = [base]
-    else:
-        bases = _allowed_roots()
+    bases, error = _resolve_read_bases(path)
+    if error:
+        return error
 
     results = []
     for base in bases:
@@ -271,13 +337,9 @@ def grep_files(pattern: str, path: str = "", file_glob: str = "*", max_results: 
 @tool(name="search_files", description="Search file names under allowed novel or skill directories")
 def search_files(query: str, path: str = "", max_results: int = 50) -> str:
     needle = query.lower()
-    if path:
-        base, error = _resolve_safe_path(path, allow_skill_alias=True)
-        if error:
-            return error
-        bases = [base]
-    else:
-        bases = _allowed_roots()
+    bases, error = _resolve_read_bases(path)
+    if error:
+        return error
 
     results = []
     for base in bases:

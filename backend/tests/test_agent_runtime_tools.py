@@ -3,205 +3,16 @@ from types import SimpleNamespace
 
 from app.agent.core import AgentCore
 from app.agent.session import Session
+from app.capability.subagent_manager import SubAgentManager
 from app.capability.tool_registry import execute_tool, get_tool_schemas
 from app.llm.provider import Response
 import app.tools as _tools  # noqa: F401
 
 
-def test_bash_schema_explains_permissions_and_forbidden_operations():
-    schema = next(
-        item for item in get_tool_schemas(allowed_names=["bash"])
-        if item["function"]["name"] == "bash"
-    )
+def test_bash_tool_is_not_exposed_to_agents():
+    tool_names = {schema["function"]["name"] for schema in get_tool_schemas()}
 
-    description = schema["function"]["description"]
-    command_description = schema["function"]["parameters"]["properties"]["command"]["description"]
-    combined = f"{description}\n{command_description}"
-
-    for required_text in (
-        "只能",
-        "当前工作区",
-        "只读",
-        "测试",
-        "禁止",
-        "创建",
-        "删除",
-        "移动",
-        "修改文件",
-        "网络",
-        "权限",
-        "后台",
-        "重定向",
-        "write_file",
-        "edit_file",
-    ):
-        assert required_text in combined
-
-
-def test_bash_runs_simple_command_inside_workdir(tmp_path):
-    (tmp_path / "notes.txt").write_text("hello from workspace", encoding="utf-8")
-
-    result = execute_tool(
-        "bash",
-        {"command": "cat notes.txt"},
-        context={"workdir": str(tmp_path)},
-    )
-
-    payload = json.loads(result)
-    assert payload["exit_code"] == 0
-    assert payload["stdout"] == "hello from workspace"
-    assert payload["stderr"] == ""
-
-
-def test_bash_rejects_destructive_or_outside_commands(tmp_path):
-    outside = tmp_path.parent / "outside.txt"
-    outside.write_text("secret", encoding="utf-8")
-
-    assert execute_tool(
-        "bash",
-        {"command": "rm notes.txt"},
-        context={"workdir": str(tmp_path)},
-    ).startswith("操作被拒绝")
-
-    assert execute_tool(
-        "bash",
-        {"command": "cat ../outside.txt"},
-        context={"workdir": str(tmp_path)},
-    ).startswith("操作被拒绝")
-
-
-def test_bash_rejects_mkdir_inside_workdir_because_runtime_is_read_only(tmp_path):
-    result = execute_tool(
-        "bash",
-        {"command": "mkdir -p drafts/chapter_01"},
-        context={"workdir": str(tmp_path)},
-    )
-
-    assert result.startswith("操作被拒绝")
-    assert not (tmp_path / "drafts" / "chapter_01").exists()
-
-
-def test_bash_rejects_mutating_or_ambiguous_read_commands(tmp_path):
-    note = tmp_path / "notes.txt"
-    note.write_text("beta\nalpha\n", encoding="utf-8")
-
-    commands = [
-        "find . -delete",
-        "sort notes.txt -o sorted.txt",
-        "sort --output sorted_long.txt notes.txt",
-        "git branch -D old_branch",
-        "git branch new_branch",
-        "git diff --output=diff.txt",
-        "sed -n 1p notes.txt",
-    ]
-
-    for command in commands:
-        result = execute_tool(
-            "bash",
-            {"command": command},
-            context={"workdir": str(tmp_path)},
-        )
-
-        assert result.startswith("操作被拒绝"), command
-
-    assert note.exists()
-    assert not (tmp_path / "sorted.txt").exists()
-    assert not (tmp_path / "sorted_long.txt").exists()
-    assert not (tmp_path / "diff.txt").exists()
-
-
-def test_bash_rejects_mkdir_outside_workdir(tmp_path):
-    outside = tmp_path.parent / f"{tmp_path.name}_outside_dir"
-
-    result = execute_tool(
-        "bash",
-        {"command": f"mkdir {outside}"},
-        context={"workdir": str(tmp_path)},
-    )
-
-    assert result.startswith("操作被拒绝")
-    assert not outside.exists()
-
-
-def test_bash_allows_simple_pipeline_inside_workdir(tmp_path):
-    (tmp_path / "notes.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
-
-    result = execute_tool(
-        "bash",
-        {"command": "cat notes.txt | grep beta"},
-        context={"workdir": str(tmp_path)},
-    )
-
-    payload = json.loads(result)
-    assert payload["exit_code"] == 0
-    assert payload["stdout"] == "beta"
-    assert payload["stderr"] == ""
-
-
-def test_bash_allows_and_chained_commands_inside_workdir(tmp_path):
-    (tmp_path / "notes.txt").write_text("alpha\n", encoding="utf-8")
-
-    result = execute_tool(
-        "bash",
-        {"command": "pwd && ls -la"},
-        context={"workdir": str(tmp_path)},
-    )
-
-    payload = json.loads(result)
-    assert payload["exit_code"] == 0
-    assert str(tmp_path) in payload["stdout"]
-    assert "notes.txt" in payload["stdout"]
-    assert payload["stderr"] == ""
-
-
-def test_bash_allows_devnull_redirect_and_or_fallback_inside_workdir(tmp_path):
-    (tmp_path / "novels").mkdir()
-    (tmp_path / "novels" / "chapter.txt").write_text("alpha\n", encoding="utf-8")
-    (tmp_path / ".agent").mkdir()
-    (tmp_path / ".agent" / "todo_list.json").write_text("{}", encoding="utf-8")
-
-    result = execute_tool(
-        "bash",
-        {
-            "command": (
-                'ls -la novels && echo "---" && ls -la .agent && '
-                'echo "---" && ls -la skills 2>/dev/null || echo "No skills directory"'
-            )
-        },
-        context={"workdir": str(tmp_path)},
-    )
-
-    payload = json.loads(result)
-    assert payload["exit_code"] == 0
-    assert "chapter.txt" in payload["stdout"]
-    assert "todo_list.json" in payload["stdout"]
-    assert "No skills directory" in payload["stdout"]
-    assert payload["stderr"] == ""
-
-
-def test_bash_rejects_redirect_to_workspace_file(tmp_path):
-    result = execute_tool(
-        "bash",
-        {"command": "ls > listing.txt"},
-        context={"workdir": str(tmp_path)},
-    )
-
-    assert result.startswith("操作被拒绝")
-    assert not (tmp_path / "listing.txt").exists()
-
-
-def test_bash_rejects_blocked_command_inside_pipeline(tmp_path):
-    note = tmp_path / "notes.txt"
-    note.write_text("alpha\n", encoding="utf-8")
-
-    result = execute_tool(
-        "bash",
-        {"command": "cat notes.txt | rm notes.txt"},
-        context={"workdir": str(tmp_path)},
-    )
-
-    assert result.startswith("操作被拒绝")
-    assert note.exists()
+    assert "bash" not in tool_names
 
 
 def test_todo_list_persists_items_to_workdir_file(tmp_path):
@@ -301,6 +112,118 @@ def test_create_sub_agent_inherits_main_context_and_hides_subagent_tool(tmp_path
     )
 
 
+def test_create_sub_agent_passes_configured_sub_agent_timeout():
+    class FakeSubAgentManager:
+        def __init__(self):
+            self.create_kwargs = None
+
+        def create_subagent(self, name, provider, session, **kwargs):
+            self.create_kwargs = kwargs
+            return f"subagent_{name}_0"
+
+        def execute_subagent(self, subagent_id, message):
+            return "子 Agent 结果"
+
+    manager = FakeSubAgentManager()
+    payload = json.loads(execute_tool(
+        "create_sub_agent",
+        {"name": "writer", "task": "写一个简短方案"},
+        context={
+            "provider": object(),
+            "subagent_manager": manager,
+            "parent_session": Session("main-session"),
+            "tool_context": {"agent_name": "main"},
+            "can_create_sub_agent": True,
+            "sub_agent_timeout": 300.0,
+        },
+    ))
+
+    assert payload["subagent_id"] == "subagent_writer_0"
+    assert payload["result"] == "子 Agent 结果"
+    assert manager.create_kwargs["sub_agent_timeout"] == 300.0
+
+
+def test_create_sub_agent_reuses_existing_subagent_by_default(tmp_path):
+    class FakeProvider:
+        def chat(self, messages, tools=None):
+            return Response(content="子 Agent 结果", tool_calls=None, finish_reason="stop")
+
+    manager = SubAgentManager()
+    parent_session = Session("main-session")
+    context = {
+        "provider": FakeProvider(),
+        "subagent_manager": manager,
+        "parent_session": parent_session,
+        "tool_context": {
+            "user_id": 1,
+            "novel_id": "novel_1",
+            "workdir": str(tmp_path / "novel_1"),
+            "agent_name": "main",
+        },
+        "can_create_sub_agent": True,
+    }
+
+    first_payload = json.loads(execute_tool(
+        "create_sub_agent",
+        {"name": "writer", "task": "读取总纲并生成第一章细纲"},
+        context=context,
+    ))
+    second_payload = json.loads(execute_tool(
+        "create_sub_agent",
+        {"name": "writer", "task": "基于已读总纲生成第二章细纲"},
+        context=context,
+    ))
+
+    assert first_payload["created"] is True
+    assert first_payload["reused"] is False
+    assert second_payload["created"] is False
+    assert second_payload["reused"] is True
+    assert second_payload["subagent_id"] == first_payload["subagent_id"]
+    assert len(manager.subagents) == 1
+    subagent = manager.subagents[first_payload["subagent_id"]]
+    assert [msg["content"] for msg in subagent.session.messages if msg["role"] == "user"] == [
+        "读取总纲并生成第一章细纲",
+        "基于已读总纲生成第二章细纲",
+    ]
+
+
+def test_create_sub_agent_creates_new_instance_for_different_role(tmp_path):
+    class FakeProvider:
+        def chat(self, messages, tools=None):
+            return Response(content="子 Agent 结果", tool_calls=None, finish_reason="stop")
+
+    manager = SubAgentManager()
+    context = {
+        "provider": FakeProvider(),
+        "subagent_manager": manager,
+        "parent_session": Session("main-session"),
+        "tool_context": {
+            "user_id": 1,
+            "novel_id": "novel_1",
+            "workdir": str(tmp_path / "novel_1"),
+            "agent_name": "main",
+        },
+        "can_create_sub_agent": True,
+    }
+
+    first_payload = json.loads(execute_tool(
+        "create_sub_agent",
+        {"name": "writer", "task": "写第一章"},
+        context=context,
+    ))
+    second_payload = json.loads(execute_tool(
+        "create_sub_agent",
+        {"name": "reviewer", "task": "审查第一章"},
+        context=context,
+    ))
+
+    assert first_payload["subagent_id"] != second_payload["subagent_id"]
+    assert first_payload["created"] is True
+    assert second_payload["created"] is True
+    assert second_payload["reused"] is False
+    assert len(manager.subagents) == 2
+
+
 def test_main_agent_prompt_forbids_concrete_creation_review_and_writing(tmp_path):
     class FakeProvider:
         def __init__(self):
@@ -330,6 +253,9 @@ def test_main_agent_prompt_forbids_concrete_creation_review_and_writing(tmp_path
     assert "生成、审稿、改写、整理成稿、保存或文件修改" in system_text
     assert "必须调用 create_sub_agent" in system_text
     assert "任务单" in system_text
+    assert "连续处理同一小说的同类任务时复用同一个角色名" in system_text
+    assert "同一时间只保留一个活跃子 Agent" in system_text
+    assert "上下文接近满载" in system_text
 
 
 def test_create_sub_agent_task_schema_rejects_main_agent_finished_drafts():
@@ -341,8 +267,10 @@ def test_create_sub_agent_task_schema_rejects_main_agent_finished_drafts():
     )
 
     task_description = schema["function"]["parameters"]["properties"]["task"]["description"]
+    properties = schema["function"]["parameters"]["properties"]
     assert "不要把主 Agent 自己生成的大段正文" in task_description
     assert "任务单" in task_description
+    assert "reuse_existing" not in properties
 
 
 def test_main_agent_retries_with_subagent_when_it_generates_concrete_output(tmp_path):

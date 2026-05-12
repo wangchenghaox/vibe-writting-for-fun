@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -77,6 +78,121 @@ def test_create_subagent_uses_configured_max_tool_rounds():
     )
 
     assert manager.subagents[agent_id].max_tool_rounds == 33
+
+
+def test_create_subagent_uses_configured_sub_agent_timeout_without_mutating_parent_provider():
+    class FakeProvider:
+        def __init__(self, timeout):
+            self.timeout = timeout
+            self.clone_requests = []
+
+        def with_timeout(self, timeout):
+            self.clone_requests.append(timeout)
+            return FakeProvider(timeout)
+
+    provider = FakeProvider(timeout=120.0)
+    session = Session("test")
+    manager = SubAgentManager()
+
+    agent_id = manager.create_subagent(
+        "writer",
+        provider,
+        session,
+        sub_agent_timeout=300.0,
+    )
+
+    assert provider.timeout == 120.0
+    assert provider.clone_requests == [300.0]
+    assert manager.subagents[agent_id].provider.timeout == 300.0
+
+
+def test_get_or_create_subagent_reuses_same_role_with_same_context(tmp_path):
+    mock_provider = Mock()
+    session = Session("parent_session")
+    session.context.update({
+        "user_id": 1,
+        "novel_id": "novel_1",
+        "workdir": str(tmp_path / "novel_1"),
+    })
+    manager = SubAgentManager()
+
+    first_id, first_created = manager.get_or_create_subagent("writer", mock_provider, session)
+    manager.subagents[first_id].session.add_message("assistant", "已读取总纲")
+    second_id, second_created = manager.get_or_create_subagent("writer", mock_provider, session)
+
+    assert first_created is True
+    assert second_created is False
+    assert second_id == first_id
+    assert manager.subagents[second_id].session.messages[-1]["content"] == "已读取总纲"
+
+
+def test_get_or_create_subagent_keeps_roles_and_novels_isolated(tmp_path):
+    mock_provider = Mock()
+    session = Session("parent_session")
+    manager = SubAgentManager()
+
+    writer_id, _ = manager.get_or_create_subagent(
+        "writer",
+        mock_provider,
+        session,
+        tool_context={
+            "user_id": 1,
+            "novel_id": "novel_1",
+            "workdir": str(tmp_path / "novel_1"),
+        },
+    )
+    reviewer_id, _ = manager.get_or_create_subagent(
+        "reviewer",
+        mock_provider,
+        session,
+        tool_context={
+            "user_id": 1,
+            "novel_id": "novel_1",
+            "workdir": str(tmp_path / "novel_1"),
+        },
+    )
+    other_novel_writer_id, _ = manager.get_or_create_subagent(
+        "writer",
+        mock_provider,
+        session,
+        tool_context={
+            "user_id": 1,
+            "novel_id": "novel_2",
+            "workdir": str(tmp_path / "novel_2"),
+        },
+    )
+
+    assert writer_id != reviewer_id
+    assert writer_id != other_novel_writer_id
+    assert reviewer_id != other_novel_writer_id
+    assert writer_id in manager.subagents
+    assert reviewer_id in manager.subagents
+    assert other_novel_writer_id in manager.subagents
+    assert len(manager.subagents) == 3
+
+
+def test_get_or_create_subagent_replaces_same_role_when_context_nearly_full(tmp_path):
+    mock_provider = Mock()
+    session = Session("parent_session")
+    session.context.update({
+        "user_id": 1,
+        "novel_id": "novel_1",
+        "workdir": str(tmp_path / "novel_1"),
+    })
+    manager = SubAgentManager()
+
+    first_id, first_created = manager.get_or_create_subagent("writer", mock_provider, session)
+    first_subagent = manager.subagents[first_id]
+    first_subagent.context_compressor.max_tokens = 10
+    first_subagent.session.add_message("user", "x" * 40)
+    second_id, second_created = manager.get_or_create_subagent("writer", mock_provider, session)
+
+    assert first_created is True
+    assert second_created is True
+    assert second_id != first_id
+    assert first_id not in manager.subagents
+    assert second_id in manager.subagents
+    assert len(manager.subagents) == 1
 
 
 def test_create_subagent_does_not_attach_recorder_by_default():
@@ -167,6 +283,46 @@ def test_execute_subagent_records_raw_log_events_when_memory_enabled():
         ("user_message", {"content": "hello"}),
         ("assistant_message", {"content": "ok"}),
     ]
+
+
+def test_execute_subagent_rejects_parallel_execution():
+    manager = SubAgentManager()
+    entered = threading.Event()
+    release = threading.Event()
+    second_called = False
+
+    class BlockingAgent:
+        def chat(self, message):
+            entered.set()
+            assert release.wait(timeout=2)
+            return "first done"
+
+    class SecondAgent:
+        def chat(self, message):
+            nonlocal second_called
+            second_called = True
+            return "second done"
+
+    manager.subagents["subagent_writer_0"] = BlockingAgent()
+    manager.subagents["subagent_reviewer_1"] = SecondAgent()
+
+    first_result = {}
+    worker = threading.Thread(
+        target=lambda: first_result.setdefault(
+            "value",
+            manager.execute_subagent("subagent_writer_0", "first"),
+        )
+    )
+    worker.start()
+    assert entered.wait(timeout=2)
+
+    second_result = manager.execute_subagent("subagent_reviewer_1", "second")
+
+    release.set()
+    worker.join(timeout=2)
+    assert first_result["value"] == "first done"
+    assert "已有子 Agent 正在执行任务" in second_result
+    assert second_called is False
 
 
 def test_remove_subagent():

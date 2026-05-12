@@ -37,6 +37,27 @@ def test_openai_provider_sends_reasoning_effort_when_thinking_enabled():
     assert fake_completions.calls[0]["reasoning_effort"] == "high"
 
 
+def test_openai_provider_with_timeout_clones_provider_without_mutating_original():
+    provider = KimiProvider(
+        api_key="test",
+        model="kimi-test",
+        base_url="https://example.test/v1",
+        timeout=120,
+        max_retries=4,
+        thinking_config=ThinkingConfig(enabled=True, keep="all"),
+    )
+
+    cloned = provider.with_timeout(300)
+
+    assert isinstance(cloned, KimiProvider)
+    assert cloned is not provider
+    assert provider.timeout == 120.0
+    assert cloned.timeout == 300.0
+    assert cloned.model == "kimi-test"
+    assert cloned.max_retries == 4
+    assert cloned.thinking_config == provider.thinking_config
+
+
 def test_openai_provider_sends_none_reasoning_effort_when_thinking_disabled():
     provider = OpenAICompatibleProvider(
         api_key="test",

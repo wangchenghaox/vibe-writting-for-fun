@@ -13,6 +13,8 @@ def test_cli_import_exposes_file_memory_and_search_tools_without_json_domain_too
     tool_names = {schema["function"]["name"] for schema in get_tool_schemas()}
 
     assert {
+        "copy_file",
+        "make_directory",
         "read_file",
         "write_file",
         "edit_file",
@@ -25,6 +27,7 @@ def test_cli_import_exposes_file_memory_and_search_tools_without_json_domain_too
         "list_memories",
         "archive_memory",
     }.issubset(tool_names)
+    assert "bash" not in tool_names
     assert {
         "get_novel",
         "save_novel_document",

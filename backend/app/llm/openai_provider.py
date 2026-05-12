@@ -18,6 +18,8 @@ class OpenAICompatibleProvider(LLMProvider):
         max_retries: int = 2,
         thinking_config: Optional[ThinkingConfig] = None,
     ):
+        self.api_key = api_key
+        self.base_url = base_url
         self.timeout = float(timeout)
         self.max_retries = int(max_retries)
         self.thinking_config = thinking_config or ThinkingConfig()
@@ -28,6 +30,16 @@ class OpenAICompatibleProvider(LLMProvider):
             max_retries=self.max_retries,
         )
         self.model = model
+
+    def with_timeout(self, timeout: float):
+        return self.__class__(
+            api_key=self.api_key,
+            model=self.model,
+            base_url=self.base_url,
+            timeout=timeout,
+            max_retries=self.max_retries,
+            thinking_config=self.thinking_config,
+        )
 
     def _prepare_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         prepared = []

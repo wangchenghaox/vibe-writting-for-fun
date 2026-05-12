@@ -82,6 +82,8 @@ def test_json_domain_tools_are_not_exposed_to_agent_schema():
     }.isdisjoint(tool_names)
 
     assert {
+        "copy_file",
+        "make_directory",
         "read_file",
         "write_file",
         "edit_file",
@@ -89,6 +91,7 @@ def test_json_domain_tools_are_not_exposed_to_agent_schema():
         "search_files",
         "grep_files",
     }.issubset(tool_names)
+    assert "bash" not in tool_names
 
 
 def test_write_file_schema_warns_content_must_be_complete():
