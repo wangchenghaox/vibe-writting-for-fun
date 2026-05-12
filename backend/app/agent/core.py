@@ -100,6 +100,10 @@ MAIN_AGENT_ROLE_PROMPT = (
     "主 Agent 只输出必要的澄清问题、简短计划、任务单和子 Agent 执行结果摘要。"
     "委派时，task 参数必须是任务单：写清目标、背景、可读取路径、输出格式、目标文件路径和验收标准；"
     "不要把主 Agent 自己生成的大段正文、大纲或审稿意见塞进 task 让子 Agent 只负责保存。"
+    "连续处理同一小说的同类任务时复用同一个角色名，例如 writer、planner 或 reviewer，"
+    "让子 Agent 保留已读取的短期上下文；不同职责使用不同角色名创建不同实例。"
+    "同一时间只保留一个活跃子 Agent 执行任务；创建类似职责的子 Agent 时尽量复用已有角色名，"
+    "只有已有子 Agent 上下文接近满载时，系统才会替换为新实例。"
 )
 SUB_AGENT_ROLE_PROMPT = (
     "运行时角色：你是子 Agent。你只负责执行主 Agent 分配的具体任务，不能直接与用户对话，"
@@ -131,7 +135,8 @@ class AgentCore:
         skill_loader: Optional[SkillLoader] = None,
         memory_recorder=None,
         memory_enabled: bool = False,
-        max_tool_rounds: int = 20,
+        max_tool_rounds: int = 100,
+        sub_agent_timeout: Optional[float] = None,
         blocked_tool_names: Optional[set[str]] = None,
         can_create_sub_agent: bool = True,
     ):
@@ -141,6 +146,7 @@ class AgentCore:
         self.memory_recorder = memory_recorder
         self.memory_enabled = memory_enabled
         self.max_tool_rounds = max_tool_rounds
+        self.sub_agent_timeout = sub_agent_timeout
         self.blocked_tool_names = set(blocked_tool_names or [])
         self.can_create_sub_agent = can_create_sub_agent
         self.event_bus = EventBus()
@@ -213,6 +219,7 @@ class AgentCore:
             "memory_enabled": self.memory_enabled,
             "can_create_sub_agent": self.can_create_sub_agent,
             "max_tool_rounds": self.max_tool_rounds,
+            "sub_agent_timeout": self.sub_agent_timeout,
         })
         return context
 

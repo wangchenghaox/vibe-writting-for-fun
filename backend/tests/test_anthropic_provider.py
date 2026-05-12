@@ -47,6 +47,27 @@ def test_anthropic_chat_stream_response_uses_stream_helper_without_stream_flag()
     assert events[-1].response.content == "你好"
 
 
+def test_anthropic_provider_with_timeout_clones_provider_without_mutating_original():
+    provider = AnthropicProvider(
+        api_key="test",
+        model="claude-test",
+        base_url="https://example.test",
+        timeout=120,
+        max_retries=4,
+        thinking_config=ThinkingConfig(enabled=True, budget_tokens=2048),
+    )
+
+    cloned = provider.with_timeout(300)
+
+    assert isinstance(cloned, AnthropicProvider)
+    assert cloned is not provider
+    assert provider.timeout == 120.0
+    assert cloned.timeout == 300.0
+    assert cloned.model == "claude-test"
+    assert cloned.max_retries == 4
+    assert cloned.thinking_config == provider.thinking_config
+
+
 def test_anthropic_chat_sends_thinking_config_when_enabled():
     provider = AnthropicProvider(
         api_key="test",

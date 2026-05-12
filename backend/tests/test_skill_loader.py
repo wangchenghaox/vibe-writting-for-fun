@@ -1,4 +1,5 @@
 from app.capability.skill_loader import SkillLoader
+from app.core.config import settings
 
 
 def test_load_nonexistent_skill():
@@ -43,6 +44,39 @@ priority: 20
     assert skill.allowed_tools == ["load_chapter"]
     assert skill.priority == 20
     assert "请检查情节" in skill.content
+
+
+def test_default_loader_discovers_configured_multiple_skill_dirs(monkeypatch, tmp_path):
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    (first_dir / "alpha.md").write_text(
+        """---
+name: alpha
+description: first skill
+---
+alpha body
+""",
+        encoding="utf-8",
+    )
+    (second_dir / "beta.md").write_text(
+        """---
+name: beta
+description: second skill
+---
+beta body
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "SKILL_DIRS", f"{first_dir},{second_dir}")
+
+    loader = SkillLoader()
+    skills = loader.discover_skills()
+
+    assert set(skills) == {"alpha", "beta"}
+    assert loader.load_skill("beta") == "beta body"
+    assert "说明文件: skills/beta.md" in loader.build_catalog_prompt()
 
 
 def test_catalog_orders_skills_by_priority(tmp_path):

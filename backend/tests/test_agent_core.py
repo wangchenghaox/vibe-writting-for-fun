@@ -29,7 +29,7 @@ class TestAgentCore:
         agent = AgentCore(mock_provider, session)
         assert agent.provider == mock_provider
         assert agent.session == session
-        assert agent.max_tool_rounds == 20
+        assert agent.max_tool_rounds == 100
 
     def test_chat_simple_response(self, mock_provider, session):
         agent = AgentCore(mock_provider, session)
