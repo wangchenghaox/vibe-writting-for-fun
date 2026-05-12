@@ -68,11 +68,50 @@ priority: 5
         assert "正式开始写作、整理、改写、审稿或保存前" in system_messages[0]
         assert "progress.md" in system_messages[0]
         assert "修改或生成新内容后" in system_messages[0]
+        assert "不开启本地 skill catalog 时" not in system_messages[0]
         assert "技能: chapter-writer" in system_messages[1]
         assert all(
             "中文长篇小说创作 CLI Agent" not in msg["content"]
             for msg in session.messages
         )
+
+    def test_chat_can_inline_skill_guidance_in_base_prompt_when_skills_disabled(self, session, tmp_path):
+        (tmp_path / "chapter-writer.md").write_text(
+            """---
+name: chapter-writer
+description: 章节创作
+triggers: [写章节]
+priority: 5
+---
+# 章节创作
+""",
+            encoding="utf-8",
+        )
+
+        provider = Mock()
+        provider.chat.return_value = SimpleNamespace(content="done", tool_calls=None)
+        agent = AgentCore(
+            provider,
+            session,
+            skill_loader=SkillLoader(skills_dir=tmp_path),
+            skills_enabled=False,
+        )
+
+        assert agent.chat("请写第二章") == "done"
+
+        messages, _tools = provider.chat.call_args.args
+        system_messages = [msg["content"] for msg in messages if msg["role"] == "system"]
+        assert "你是一个中文长篇小说创作 CLI Agent" in system_messages[0]
+        assert "不开启本地 skill catalog 时" in system_messages[0]
+        assert "创作、规划、角色、审稿和保存" in system_messages[0]
+        assert "progress.md" in system_messages[0]
+        assert "主 Agent 负责面向用户确认目标、约束和验收标准" in system_messages[0]
+        assert "第几章、视角、篇幅、承接内容、核心冲突和结尾钩子" in system_messages[0]
+        assert "章节写作：" not in system_messages[0]
+        assert "这组规则是本地创作 skill 的整理版" not in system_messages[0]
+        assert "技能: chapter-writer" not in "\n".join(system_messages)
+        assert "你可以使用以下本地创作技能" not in "\n".join(system_messages)
+        assert "skills/*.md" not in system_messages[0]
 
     def test_chat_stops_after_max_tool_rounds(self, session):
         tool_name = f"loop_probe_{uuid4().hex}"

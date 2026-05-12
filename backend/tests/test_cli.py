@@ -45,6 +45,14 @@ def test_settings_default_sub_agent_timeout():
     assert Settings(_env_file=None).SUB_AGENT_TIMEOUT == 600.0
 
 
+def test_settings_enable_skills_by_default(monkeypatch):
+    from app.core.config import Settings
+
+    monkeypatch.delenv("SKILLS_ENABLED", raising=False)
+
+    assert Settings(_env_file=None).SKILLS_ENABLED is True
+
+
 def test_cli_streams_assistant_response(monkeypatch):
     import app.cli.app as cli_module
 
@@ -60,6 +68,7 @@ def test_cli_streams_assistant_response(monkeypatch):
             memory_enabled=False,
             max_tool_rounds=100,
             sub_agent_timeout=600.0,
+            skills_enabled=True,
         ):
             self.event_bus = type(
                 "FakeEventBus",
@@ -72,6 +81,7 @@ def test_cli_streams_assistant_response(monkeypatch):
             self.memory_enabled = memory_enabled
             self.max_tool_rounds = max_tool_rounds
             self.sub_agent_timeout = sub_agent_timeout
+            self.skills_enabled = skills_enabled
             self.chat_calls = []
             self.chat_stream_calls = []
             created_agents.append(self)
@@ -89,6 +99,7 @@ def test_cli_streams_assistant_response(monkeypatch):
     saved_sessions = []
 
     monkeypatch.setattr(cli_module.settings, "WORKDIR", None)
+    monkeypatch.setattr(cli_module.settings, "SKILLS_ENABLED", True)
     monkeypatch.setattr(cli_module, "setup_logging", lambda: None)
     monkeypatch.setattr(cli_module, "create_provider", lambda: object())
     monkeypatch.setattr(cli_module, "RichDisplay", lambda: fake_display)
@@ -112,6 +123,7 @@ def test_cli_streams_assistant_response(monkeypatch):
     assert agent.memory_recorder is None
     assert agent.max_tool_rounds == 100
     assert agent.sub_agent_timeout == 600.0
+    assert agent.skills_enabled is True
     assert [args[0] for args, kwargs in fake_display.console.prints if kwargs.get("end") == ""] == [
         "\n[bold blue]Assistant:[/bold blue] ",
         "你",
@@ -144,6 +156,7 @@ def test_cli_truncates_tool_event_payloads(monkeypatch):
             memory_enabled=False,
             max_tool_rounds=100,
             sub_agent_timeout=600.0,
+            skills_enabled=True,
         ):
             self.event_bus = FakeEventBus()
             self.session = session
@@ -205,6 +218,7 @@ def test_cli_enables_memory_when_requested(monkeypatch):
             memory_enabled=False,
             max_tool_rounds=100,
             sub_agent_timeout=600.0,
+            skills_enabled=True,
         ):
             self.event_bus = type(
                 "FakeEventBus",
@@ -271,6 +285,7 @@ def test_cli_passes_configured_max_tool_rounds(monkeypatch):
             memory_enabled=False,
             max_tool_rounds=100,
             sub_agent_timeout=600.0,
+            skills_enabled=True,
         ):
             self.event_bus = type(
                 "FakeEventBus",
@@ -279,6 +294,7 @@ def test_cli_passes_configured_max_tool_rounds(monkeypatch):
             )()
             self.max_tool_rounds = max_tool_rounds
             self.sub_agent_timeout = sub_agent_timeout
+            self.skills_enabled = skills_enabled
             created_agents.append(self)
 
         def chat_stream(self, message):
@@ -287,6 +303,7 @@ def test_cli_passes_configured_max_tool_rounds(monkeypatch):
     monkeypatch.setattr(cli_module.settings, "WORKDIR", None)
     monkeypatch.setattr(cli_module.settings, "MAX_TOOL_ROUNDS", 33)
     monkeypatch.setattr(cli_module.settings, "SUB_AGENT_TIMEOUT", 360.0)
+    monkeypatch.setattr(cli_module.settings, "SKILLS_ENABLED", False)
     monkeypatch.setattr(cli_module, "setup_logging", lambda: None)
     monkeypatch.setattr(cli_module, "create_provider", lambda: object())
     monkeypatch.setattr(cli_module, "RichDisplay", lambda: FakeDisplay())
@@ -301,6 +318,7 @@ def test_cli_passes_configured_max_tool_rounds(monkeypatch):
 
     assert created_agents[0].max_tool_rounds == 33
     assert created_agents[0].sub_agent_timeout == 360.0
+    assert created_agents[0].skills_enabled is False
 
 
 def test_cli_uses_workdir_as_agent_sandbox(monkeypatch, tmp_path):
@@ -318,6 +336,7 @@ def test_cli_uses_workdir_as_agent_sandbox(monkeypatch, tmp_path):
             memory_enabled=False,
             max_tool_rounds=100,
             sub_agent_timeout=600.0,
+            skills_enabled=True,
         ):
             self.event_bus = type(
                 "FakeEventBus",
